@@ -27,7 +27,7 @@ class RigitCmd(object):
     This class is git operation command class.
     Override the GitPython client and providers git operation commands.
     """
-    path: string = None
+    path: str = ""
     def __init__(self, path):
         self.path      = path
         self._repo     = None
@@ -76,36 +76,50 @@ class RigitCmd(object):
         os.chdir(path)
         return git.Repo()
 
-    def pull(self, branch, mode):
-        repo = self.repo
-        orig = repo.remotes.origin
-        orig.pull()
-
-    def do_commit(self, comment):
-        # head > commit
-        repo = self.repo
-        repo.index.commit(comment)
-        return True
-
-    def do_add(self, files):
-        repo = self.repo
-        un_files = repo.untracked_files
-        if not un_files:
-            return False
-        try:
-            self.repo.index.add(files)
-        except GitCommandError as e:
-            print(e)
-            return False
-        else:
+    def pull(self, branch) -> bool:
+        if self.is_repo:
+            repo = self.repo
+            orig = repo.remotes.origin
+            orig.pull()
             return True
+        else:
+            return False
 
-    def push(self, master):
-        repo = self.repo
-        orig = repo.remote(name=master)
-        orig.push()
+    def do_commit(self, comment: str) -> bool:
+        if self.is_repo:
+            # head > commit
+            repo = self.repo
+            repo.index.commit(comment)
+            return True
+        else:
+            return False
 
-    def checkout(self, branch):
+    def do_add(self, files) -> bool:
+        if self.is_repo:
+            repo = self.repo
+            un_files = repo.untracked_files
+            if not un_files:
+                return False
+            try:
+                self.repo.index.add(files)
+            except GitCommandError as e:
+                print(e)
+                return False
+            else:
+                return True
+        else:
+            return False
+
+    def push(self, master) -> bool:
+        if self.is_repo:
+            repo = self.repo
+            orig = repo.remote(name=master)
+            orig.push()
+            return True
+        else:
+            return False
+
+    def checkout(self, branch) -> bool:
         repo = self.repo
         if repo.is_dirtry():
             return False
@@ -126,17 +140,19 @@ class RigitCmd(object):
         else:
             return True
 
-    def diff(self, file=""):
-        diffs = [ unicode(dif.diff)for dif in self.parent.diff(self.head,
-                                                               creaste_patch=True)
-        if file != "" and dif.b_blob.name == file ]
+    def diff(self, file="") -> list:
+        diffs = [ unicode(dif.diff)
+                  for dif in self.parent.diff(self.head,
+                                              creaste_patch=True)
+                 if file != "" and dif.b_blob.name == file
+                ]
         return diffs
 
     # logをうまいこと活用したい。
-    def get_log(log):
+    def get_log(self, log):
         pass
 
-    def out_log(log):
+    def out_log(self, log):
         pass
 
     def get_commit_log(self, branch, max_count=10):

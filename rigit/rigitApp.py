@@ -10,10 +10,11 @@ import os
 import time
 import re
 
+sys.dont_write_bytecode = True
+
 app_name = os.path.splitext(os.path.basename(__file__))[0]
 
 # style note: we use camelCase here since we're masquerading a Qt class
-
 class RigitApplication(object):
     """
     Main rigit application class.
@@ -44,7 +45,7 @@ class RigitApplication(object):
         ctx = self.context
         monitor = ctx.fsmonitor
         monitor.files_canged.connect()
-    
+
     def stop(self):
         """finalize app"""
 
