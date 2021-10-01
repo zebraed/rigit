@@ -3,23 +3,23 @@
 #
 # This module is part of GitPython and is released under
 # the BSD License: http://www.opensource.org/licenses/bsd-license.php
-
-from collections import namedtuple
+from __future__ import annotations
 import logging
 import os
 import re
+import shlex
 import warnings
+from gitdb.db.loose import LooseObjectDB
+
+from gitdb.exc import BadObject
 
 from git.cmd import (
     Git,
     handle_process_output
 )
 from git.compat import (
-    text_type,
     defenc,
-    PY3,
     safe_decode,
-    range,
     is_win,
 )
 from git.config import GitConfigParser
@@ -29,25 +29,42 @@ from git.index import IndexFile
 from git.objects import Submodule, RootModule, Commit
 from git.refs import HEAD, Head, Reference, TagReference
 from git.remote import Remote, add_progress, to_progress_instance
-from git.util import Actor, finalize_process, decygpath, hex_to_bin, expand_path
+from git.util import Actor, finalize_process, decygpath, hex_to_bin, expand_path, remove_password_if_present
 import os.path as osp
 
 from .fun import rev_parse, is_git_dir, find_submodule_git_dir, touch, find_worktree_git_dir
 import gc
 import gitdb
 
-try:
-    import pathlib
-except ImportError:
-    pathlib = None
+# typing ------------------------------------------------------
 
+from git.types import TBD, PathLike, Lit_config_levels, Commit_ish, Tree_ish, assert_never
+from typing import (Any, BinaryIO, Callable, Dict,
+                    Iterator, List, Mapping, Optional, Sequence,
+                    TextIO, Tuple, Type, Union,
+                    NamedTuple, cast, TYPE_CHECKING)
+
+from git.types import ConfigLevels_Tup, TypedDict
+
+if TYPE_CHECKING:
+    from git.util import IterableList
+    from git.refs.symbolic import SymbolicReference
+    from git.objects import Tree
+    from git.objects.submodule.base import UpdateProgress
+    from git.remote import RemoteProgress
+
+# -----------------------------------------------------------
 
 log = logging.getLogger(__name__)
 
-BlameEntry = namedtuple('BlameEntry', ['commit', 'linenos', 'orig_path', 'orig_linenos'])
-
-
 __all__ = ('Repo',)
+
+
+class BlameEntry(NamedTuple):
+    commit: Dict[str, 'Commit']
+    linenos: range
+    orig_path: Optional[str]
+    orig_linenos: range
 
 
 class Repo(object):
@@ -66,28 +83,30 @@ class Repo(object):
     'git_dir' is the .git repository directory, which is always set."""
     DAEMON_EXPORT_FILE = 'git-daemon-export-ok'
 
-    git = None  # Must exist, or  __del__  will fail in case we raise on `__init__()`
-    working_dir = None
-    _working_tree_dir = None
-    git_dir = None
-    _common_dir = None
+    git = cast('Git', None)  # Must exist, or  __del__  will fail in case we raise on `__init__()`
+    working_dir: Optional[PathLike] = None
+    _working_tree_dir: Optional[PathLike] = None
+    git_dir: PathLike = ""
+    _common_dir: PathLike = ""
 
     # precompiled regex
     re_whitespace = re.compile(r'\s+')
     re_hexsha_only = re.compile('^[0-9A-Fa-f]{40}$')
     re_hexsha_shortened = re.compile('^[0-9A-Fa-f]{4,40}$')
+    re_envvars = re.compile(r'(\$(\{\s?)?[a-zA-Z_]\w*(\}\s?)?|%\s?[a-zA-Z_]\w*\s?%)')
     re_author_committer_start = re.compile(r'^(author|committer)')
     re_tab_full_line = re.compile(r'^\t(.*)$')
 
     # invariants
     # represents the configuration level of a configuration file
-    config_level = ("system", "user", "global", "repository")
+    config_level: ConfigLevels_Tup = ("system", "user", "global", "repository")
 
     # Subclass configuration
     # Subclasses may easily bring in their own custom types by placing a constructor or type here
     GitCommandWrapperType = Git
 
-    def __init__(self, path=None, odbt=GitCmdObjectDB, search_parent_directories=False, expand_vars=True):
+    def __init__(self, path: Optional[PathLike] = None, odbt: Type[LooseObjectDB] = GitCmdObjectDB,
+                 search_parent_directories: bool = False, expand_vars: bool = True) -> None:
         """Create a new Repo instance
 
         :param path:
@@ -124,12 +143,13 @@ class Repo(object):
         epath = epath or path or os.getcwd()
         if not isinstance(epath, str):
             epath = str(epath)
-        if expand_vars and ("%" in epath or "$" in epath):
+        if expand_vars and re.search(self.re_envvars, epath):
             warnings.warn("The use of environment variables in paths is deprecated" +
                           "\nfor security reasons and may be removed in the future!!")
         epath = expand_path(epath, expand_vars)
-        if not os.path.exists(epath):
-            raise NoSuchPathError(epath)
+        if epath is not None:
+            if not os.path.exists(epath):
+                raise NoSuchPathError(epath)
 
         ## Walk up the path to find the `.git` dir.
         #
@@ -192,8 +212,8 @@ class Repo(object):
         try:
             common_dir = open(osp.join(self.git_dir, 'commondir'), 'rt').readlines()[0].strip()
             self._common_dir = osp.join(self.git_dir, common_dir)
-        except (OSError, IOError):
-            self._common_dir = None
+        except OSError:
+            self._common_dir = ""
 
         # adjust the wd in case we are actually bare - we didn't know that
         # in the first place
@@ -201,28 +221,29 @@ class Repo(object):
             self._working_tree_dir = None
         # END working dir handling
 
-        self.working_dir = self._working_tree_dir or self.common_dir
+        self.working_dir: Optional[PathLike] = self._working_tree_dir or self.common_dir
         self.git = self.GitCommandWrapperType(self.working_dir)
 
         # special handling, in special times
-        args = [osp.join(self.common_dir, 'objects')]
+        rootpath = osp.join(self.common_dir, 'objects')
         if issubclass(odbt, GitCmdObjectDB):
-            args.append(self.git)
-        self.odb = odbt(*args)
+            self.odb = odbt(rootpath, self.git)
+        else:
+            self.odb = odbt(rootpath)
 
-    def __enter__(self):
+    def __enter__(self) -> 'Repo':
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(self, *args: Any) -> None:
         self.close()
 
-    def __del__(self):
+    def __del__(self) -> None:
         try:
             self.close()
         except Exception:
             pass
 
-    def close(self):
+    def close(self) -> None:
         if self.git:
             self.git.clear_cache()
             # Tempfiles objects on Windows are holding references to
@@ -237,25 +258,27 @@ class Repo(object):
             if is_win:
                 gc.collect()
 
-    def __eq__(self, rhs):
-        if isinstance(rhs, Repo):
+    def __eq__(self, rhs: object) -> bool:
+        if isinstance(rhs, Repo) and self.git_dir:
             return self.git_dir == rhs.git_dir
         return False
 
-    def __ne__(self, rhs):
+    def __ne__(self, rhs: object) -> bool:
         return not self.__eq__(rhs)
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash(self.git_dir)
 
     # Description property
-    def _get_description(self):
-        filename = osp.join(self.git_dir, 'description')
+    def _get_description(self) -> str:
+        if self.git_dir:
+            filename = osp.join(self.git_dir, 'description')
         with open(filename, 'rb') as fp:
             return fp.read().rstrip().decode(defenc)
 
-    def _set_description(self, descr):
-        filename = osp.join(self.git_dir, 'description')
+    def _set_description(self, descr: str) -> None:
+        if self.git_dir:
+            filename = osp.join(self.git_dir, 'description')
         with open(filename, 'wb') as fp:
             fp.write((descr + '\n').encode(defenc))
 
@@ -265,25 +288,31 @@ class Repo(object):
     del _set_description
 
     @property
-    def working_tree_dir(self):
+    def working_tree_dir(self) -> Optional[PathLike]:
         """:return: The working tree directory of our git repository. If this is a bare repository, None is returned.
         """
         return self._working_tree_dir
 
     @property
-    def common_dir(self):
-        """:return: The git dir that holds everything except possibly HEAD,
-        FETCH_HEAD, ORIG_HEAD, COMMIT_EDITMSG, index, and logs/ .
+    def common_dir(self) -> PathLike:
         """
-        return self._common_dir or self.git_dir
+        :return: The git dir that holds everything except possibly HEAD,
+            FETCH_HEAD, ORIG_HEAD, COMMIT_EDITMSG, index, and logs/."""
+        if self._common_dir:
+            return self._common_dir
+        elif self.git_dir:
+            return self.git_dir
+        else:
+            # or could return ""
+            raise InvalidGitRepositoryError()
 
     @property
-    def bare(self):
+    def bare(self) -> bool:
         """:return: True if the repository is bare"""
         return self._bare
 
     @property
-    def heads(self):
+    def heads(self) -> 'IterableList[Head]':
         """A list of ``Head`` objects representing the branch heads in
         this repo
 
@@ -291,7 +320,7 @@ class Repo(object):
         return Head.list_items(self)
 
     @property
-    def references(self):
+    def references(self) -> 'IterableList[Reference]':
         """A list of Reference objects representing tags, heads and remote references.
 
         :return: IterableList(Reference, ...)"""
@@ -304,24 +333,24 @@ class Repo(object):
     branches = heads
 
     @property
-    def index(self):
+    def index(self) -> 'IndexFile':
         """:return: IndexFile representing this repository's index.
         :note: This property can be expensive, as the returned ``IndexFile`` will be
          reinitialized. It's recommended to re-use the object."""
         return IndexFile(self)
 
     @property
-    def head(self):
+    def head(self) -> 'HEAD':
         """:return: HEAD Object pointing to the current head reference"""
         return HEAD(self, 'HEAD')
 
     @property
-    def remotes(self):
+    def remotes(self) -> 'IterableList[Remote]':
         """A list of Remote objects allowing to access and manipulate remotes
         :return: ``git.IterableList(Remote, ...)``"""
         return Remote.list_items(self)
 
-    def remote(self, name='origin'):
+    def remote(self, name: str = 'origin') -> 'Remote':
         """:return: Remote with the specified name
         :raise ValueError:  if no remote with such a name exists"""
         r = Remote(self, name)
@@ -332,22 +361,22 @@ class Repo(object):
     #{ Submodules
 
     @property
-    def submodules(self):
+    def submodules(self) -> 'IterableList[Submodule]':
         """
         :return: git.IterableList(Submodule, ...) of direct submodules
             available from the current head"""
         return Submodule.list_items(self)
 
-    def submodule(self, name):
+    def submodule(self, name: str) -> 'Submodule':
         """ :return: Submodule with the given name
         :raise ValueError: If no such submodule exists"""
         try:
             return self.submodules[name]
-        except IndexError:
-            raise ValueError("Didn't find submodule named %r" % name)
+        except IndexError as e:
+            raise ValueError("Didn't find submodule named %r" % name) from e
         # END exception handling
 
-    def create_submodule(self, *args, **kwargs):
+    def create_submodule(self, *args: Any, **kwargs: Any) -> Submodule:
         """Create a new submodule
 
         :note: See the documentation of Submodule.add for a description of the
@@ -355,13 +384,13 @@ class Repo(object):
         :return: created submodules"""
         return Submodule.add(self, *args, **kwargs)
 
-    def iter_submodules(self, *args, **kwargs):
+    def iter_submodules(self, *args: Any, **kwargs: Any) -> Iterator[Submodule]:
         """An iterator yielding Submodule instances, see Traversable interface
         for a description of args and kwargs
         :return: Iterator"""
         return RootModule(self).traverse(*args, **kwargs)
 
-    def submodule_update(self, *args, **kwargs):
+    def submodule_update(self, *args: Any, **kwargs: Any) -> Iterator[Submodule]:
         """Update the submodules, keeping the repository consistent as it will
         take the previous state into consideration. For more information, please
         see the documentation of RootModule.update"""
@@ -370,41 +399,56 @@ class Repo(object):
     #}END submodules
 
     @property
-    def tags(self):
+    def tags(self) -> 'IterableList[TagReference]':
         """A list of ``Tag`` objects that are available in this repo
         :return: ``git.IterableList(TagReference, ...)`` """
         return TagReference.list_items(self)
 
-    def tag(self, path):
+    def tag(self, path: PathLike) -> TagReference:
         """:return: TagReference Object, reference pointing to a Commit or Tag
         :param path: path to the tag reference, i.e. 0.1.5 or tags/0.1.5 """
-        return TagReference(self, path)
+        full_path = self._to_full_tag_path(path)
+        return TagReference(self, full_path)
 
-    def create_head(self, path, commit='HEAD', force=False, logmsg=None):
+    @staticmethod
+    def _to_full_tag_path(path: PathLike) -> str:
+        path_str = str(path)
+        if path_str.startswith(TagReference._common_path_default + '/'):
+            return path_str
+        if path_str.startswith(TagReference._common_default + '/'):
+            return Reference._common_path_default + '/' + path_str
+        else:
+            return TagReference._common_path_default + '/' + path_str
+
+    def create_head(self, path: PathLike, commit: str = 'HEAD',
+                    force: bool = False, logmsg: Optional[str] = None
+                    ) -> 'Head':
         """Create a new head within the repository.
         For more documentation, please see the Head.create method.
 
         :return: newly created Head Reference"""
-        return Head.create(self, path, commit, force, logmsg)
+        return Head.create(self, path, commit, logmsg, force)
 
-    def delete_head(self, *heads, **kwargs):
+    def delete_head(self, *heads: 'Head', **kwargs: Any) -> None:
         """Delete the given heads
 
         :param kwargs: Additional keyword arguments to be passed to git-branch"""
         return Head.delete(self, *heads, **kwargs)
 
-    def create_tag(self, path, ref='HEAD', message=None, force=False, **kwargs):
+    def create_tag(self, path: PathLike, ref: str = 'HEAD',
+                   message: Optional[str] = None, force: bool = False, **kwargs: Any
+                   ) -> TagReference:
         """Create a new tag reference.
         For more documentation, please see the TagReference.create method.
 
         :return: TagReference object """
         return TagReference.create(self, path, ref, message, force, **kwargs)
 
-    def delete_tag(self, *tags):
+    def delete_tag(self, *tags: TagReference) -> None:
         """Delete the given tag references"""
         return TagReference.delete(self, *tags)
 
-    def create_remote(self, name, url, **kwargs):
+    def create_remote(self, name: str, url: str, **kwargs: Any) -> Remote:
         """Create a new remote.
 
         For more information, please see the documentation of the Remote.create
@@ -413,11 +457,11 @@ class Repo(object):
         :return: Remote reference"""
         return Remote.create(self, name, url, **kwargs)
 
-    def delete_remote(self, remote):
+    def delete_remote(self, remote: 'Remote') -> str:
         """Delete the given remote."""
         return Remote.remove(self, remote)
 
-    def _get_config_path(self, config_level):
+    def _get_config_path(self, config_level: Lit_config_levels) -> str:
         # we do not support an absolute path of the gitconfig on windows ,
         # use the global config instead
         if is_win and config_level == "system":
@@ -431,11 +475,18 @@ class Repo(object):
         elif config_level == "global":
             return osp.normpath(osp.expanduser("~/.gitconfig"))
         elif config_level == "repository":
-            return osp.normpath(osp.join(self._common_dir or self.git_dir, "config"))
+            repo_dir = self._common_dir or self.git_dir
+            if not repo_dir:
+                raise NotADirectoryError
+            else:
+                return osp.normpath(osp.join(repo_dir, "config"))
+        else:
 
-        raise ValueError("Invalid configuration level: %r" % config_level)
+            assert_never(config_level,                                                  # type:ignore[unreachable]
+                         ValueError(f"Invalid configuration level: {config_level!r}"))
 
-    def config_reader(self, config_level=None):
+    def config_reader(self, config_level: Optional[Lit_config_levels] = None,
+                      ) -> GitConfigParser:
         """
         :return:
             GitConfigParser allowing to read the full git configuration, but not to write it
@@ -451,12 +502,14 @@ class Repo(object):
             unknown, instead the global path will be used."""
         files = None
         if config_level is None:
-            files = [self._get_config_path(f) for f in self.config_level]
+            files = [self._get_config_path(cast(Lit_config_levels, f))
+                     for f in self.config_level if cast(Lit_config_levels, f)]
         else:
             files = [self._get_config_path(config_level)]
-        return GitConfigParser(files, read_only=True)
+        return GitConfigParser(files, read_only=True, repo=self)
 
-    def config_writer(self, config_level="repository"):
+    def config_writer(self, config_level: Lit_config_levels = "repository"
+                      ) -> GitConfigParser:
         """
         :return:
             GitConfigParser allowing to write values of the specified configuration file level.
@@ -468,24 +521,26 @@ class Repo(object):
             One of the following values
             system = system wide configuration file
             global = user level configuration file
-            repository = configuration file for this repostory only"""
-        return GitConfigParser(self._get_config_path(config_level), read_only=False)
+            repository = configuration file for this repository only"""
+        return GitConfigParser(self._get_config_path(config_level), read_only=False, repo=self)
 
-    def commit(self, rev=None):
+    def commit(self, rev: Union[str, Commit_ish, None] = None
+               ) -> Commit:
         """The Commit object for the specified revision
+
         :param rev: revision specifier, see git-rev-parse for viable options.
-        :return: ``git.Commit``"""
+        :return: ``git.Commit``
+        """
         if rev is None:
             return self.head.commit
-        else:
-            return self.rev_parse(text_type(rev) + "^0")
+        return self.rev_parse(str(rev) + "^0")
 
-    def iter_trees(self, *args, **kwargs):
+    def iter_trees(self, *args: Any, **kwargs: Any) -> Iterator['Tree']:
         """:return: Iterator yielding Tree objects
         :note: Takes all arguments known to iter_commits method"""
         return (c.tree for c in self.iter_commits(*args, **kwargs))
 
-    def tree(self, rev=None):
+    def tree(self, rev: Union[Tree_ish, str, None] = None) -> 'Tree':
         """The Tree object for the given treeish revision
         Examples::
 
@@ -500,10 +555,11 @@ class Repo(object):
             operations might have unexpected results."""
         if rev is None:
             return self.head.commit.tree
-        else:
-            return self.rev_parse(text_type(rev) + "^{tree}")
+        return self.rev_parse(str(rev) + "^{tree}")
 
-    def iter_commits(self, rev=None, paths='', **kwargs):
+    def iter_commits(self, rev: Union[str, Commit, 'SymbolicReference', None] = None,
+                     paths: Union[PathLike, Sequence[PathLike]] = '',
+                     **kwargs: Any) -> Iterator[Commit]:
         """A list of Commit objects representing the history of a given ref/commit
 
         :param rev:
@@ -527,7 +583,8 @@ class Repo(object):
 
         return Commit.iter_items(self, rev, paths, **kwargs)
 
-    def merge_base(self, *rev, **kwargs):
+    def merge_base(self, *rev: TBD, **kwargs: Any
+                   ) -> List[Union[Commit_ish, None]]:
         """Find the closest common ancestor for the given revision (e.g. Commits, Tags, References, etc)
 
         :param rev: At least two revs to find the common ancestor for.
@@ -540,9 +597,9 @@ class Repo(object):
             raise ValueError("Please specify at least two revs, got only %i" % len(rev))
         # end handle input
 
-        res = []
+        res: List[Union[Commit_ish, None]] = []
         try:
-            lines = self.git.merge_base(*rev, **kwargs).splitlines()
+            lines = self.git.merge_base(*rev, **kwargs).splitlines()  # List[str]
         except GitCommandError as err:
             if err.status == 128:
                 raise
@@ -558,7 +615,7 @@ class Repo(object):
 
         return res
 
-    def is_ancestor(self, ancestor_rev, rev):
+    def is_ancestor(self, ancestor_rev: 'Commit', rev: 'Commit') -> bool:
         """Check if a commit is an ancestor of another
 
         :param ancestor_rev: Rev which should be an ancestor
@@ -573,12 +630,31 @@ class Repo(object):
             raise
         return True
 
-    def _get_daemon_export(self):
-        filename = osp.join(self.git_dir, self.DAEMON_EXPORT_FILE)
+    def is_valid_object(self, sha: str, object_type: Union[str, None] = None) -> bool:
+        try:
+            complete_sha = self.odb.partial_to_complete_sha_hex(sha)
+            object_info = self.odb.info(complete_sha)
+            if object_type:
+                if object_info.type == object_type.encode():
+                    return True
+                else:
+                    log.debug("Commit hash points to an object of type '%s'. Requested were objects of type '%s'",
+                              object_info.type.decode(), object_type)
+                    return False
+            else:
+                return True
+        except BadObject:
+            log.debug("Commit hash is invalid.")
+            return False
+
+    def _get_daemon_export(self) -> bool:
+        if self.git_dir:
+            filename = osp.join(self.git_dir, self.DAEMON_EXPORT_FILE)
         return osp.exists(filename)
 
-    def _set_daemon_export(self, value):
-        filename = osp.join(self.git_dir, self.DAEMON_EXPORT_FILE)
+    def _set_daemon_export(self, value: object) -> None:
+        if self.git_dir:
+            filename = osp.join(self.git_dir, self.DAEMON_EXPORT_FILE)
         fileexists = osp.exists(filename)
         if value and not fileexists:
             touch(filename)
@@ -590,20 +666,20 @@ class Repo(object):
     del _get_daemon_export
     del _set_daemon_export
 
-    def _get_alternates(self):
+    def _get_alternates(self) -> List[str]:
         """The list of alternates for this repo from which objects can be retrieved
 
         :return: list of strings being pathnames of alternates"""
-        alternates_path = osp.join(self.git_dir, 'objects', 'info', 'alternates')
+        if self.git_dir:
+            alternates_path = osp.join(self.git_dir, 'objects', 'info', 'alternates')
 
         if osp.exists(alternates_path):
             with open(alternates_path, 'rb') as f:
                 alts = f.read().decode(defenc)
             return alts.strip().splitlines()
-        else:
-            return []
+        return []
 
-    def _set_alternates(self, alts):
+    def _set_alternates(self, alts: List[str]) -> None:
         """Sets the alternates
 
         :param alts:
@@ -625,8 +701,8 @@ class Repo(object):
     alternates = property(_get_alternates, _set_alternates,
                           doc="Retrieve a list of alternates paths or set a list paths to be used as alternates")
 
-    def is_dirty(self, index=True, working_tree=True, untracked_files=False,
-                 submodules=True, path=None):
+    def is_dirty(self, index: bool = True, working_tree: bool = True, untracked_files: bool = False,
+                 submodules: bool = True, path: Optional[PathLike] = None) -> bool:
         """
         :return:
             ``True``, the repository is considered dirty. By default it will react
@@ -642,7 +718,7 @@ class Repo(object):
         if not submodules:
             default_args.append('--ignore-submodules')
         if path:
-            default_args.append(path)
+            default_args.extend(["--", str(path)])
         if index:
             # diff index against HEAD
             if osp.isfile(self.index.path) and \
@@ -661,7 +737,7 @@ class Repo(object):
         return False
 
     @property
-    def untracked_files(self):
+    def untracked_files(self) -> List[str]:
         """
         :return:
             list(str,...)
@@ -676,7 +752,7 @@ class Repo(object):
             consider caching it yourself."""
         return self._get_untracked_files()
 
-    def _get_untracked_files(self, *args, **kwargs):
+    def _get_untracked_files(self, *args: Any, **kwargs: Any) -> List[str]:
         # make sure we get all files, not only untracked directories
         proc = self.git.status(*args,
                                porcelain=True,
@@ -694,23 +770,33 @@ class Repo(object):
             # Special characters are escaped
             if filename[0] == filename[-1] == '"':
                 filename = filename[1:-1]
-                if PY3:
-                    # WHATEVER ... it's a mess, but works for me
-                    filename = filename.encode('ascii').decode('unicode_escape').encode('latin1').decode(defenc)
-                else:
-                    filename = filename.decode('string_escape').decode(defenc)
+                # WHATEVER ... it's a mess, but works for me
+                filename = filename.encode('ascii').decode('unicode_escape').encode('latin1').decode(defenc)
             untracked_files.append(filename)
         finalize_process(proc)
         return untracked_files
 
-    @property
-    def active_branch(self):
-        """The name of the currently active branch.
+    def ignored(self, *paths: PathLike) -> List[str]:
+        """Checks if paths are ignored via .gitignore
+        Doing so using the "git check-ignore" method.
 
+        :param paths: List of paths to check whether they are ignored or not
+        :return: subset of those paths which are ignored
+        """
+        try:
+            proc: str = self.git.check_ignore(*paths)
+        except GitCommandError:
+            return []
+        return proc.replace("\\\\", "\\").replace('"', "").split("\n")
+
+    @property
+    def active_branch(self) -> Head:
+        """The name of the currently active branch.
         :return: Head to the active branch"""
+        # reveal_type(self.head.reference)  # => Reference
         return self.head.reference
 
-    def blame_incremental(self, rev, file, **kwargs):
+    def blame_incremental(self, rev: str | HEAD, file: str, **kwargs: Any) -> Iterator['BlameEntry']:
         """Iterator for blame information for the given file at the given revision.
 
         Unlike .blame(), this does not return the actual file's contents, only
@@ -724,8 +810,9 @@ class Repo(object):
         If you combine all line number ranges outputted by this command, you
         should get a continuous range spanning all line numbers in the file.
         """
-        data = self.git.blame(rev, '--', file, p=True, incremental=True, stdout_as_string=False, **kwargs)
-        commits = {}
+
+        data: bytes = self.git.blame(rev, '--', file, p=True, incremental=True, stdout_as_string=False, **kwargs)
+        commits: Dict[bytes, Commit] = {}
 
         stream = (line for line in data.split(b'\n') if line)
         while True:
@@ -733,14 +820,15 @@ class Repo(object):
                 line = next(stream)  # when exhausted, causes a StopIteration, terminating this function
             except StopIteration:
                 return
-            hexsha, orig_lineno, lineno, num_lines = line.split()
-            lineno = int(lineno)
-            num_lines = int(num_lines)
-            orig_lineno = int(orig_lineno)
+            split_line = line.split()
+            hexsha, orig_lineno_b, lineno_b, num_lines_b = split_line
+            lineno = int(lineno_b)
+            num_lines = int(num_lines_b)
+            orig_lineno = int(orig_lineno_b)
             if hexsha not in commits:
                 # Now read the next few lines and build up a dict of properties
                 # for this commit
-                props = {}
+                props: Dict[bytes, bytes] = {}
                 while True:
                     try:
                         line = next(stream)
@@ -784,36 +872,51 @@ class Repo(object):
                              safe_decode(orig_filename),
                              range(orig_lineno, orig_lineno + num_lines))
 
-    def blame(self, rev, file, incremental=False, **kwargs):
+    def blame(self, rev: Union[str, HEAD], file: str, incremental: bool = False, **kwargs: Any
+              ) -> List[List[Commit | List[str | bytes] | None]] | Iterator[BlameEntry] | None:
         """The blame information for the given file at the given revision.
 
         :param rev: revision specifier, see git-rev-parse for viable options.
         :return:
             list: [git.Commit, list: [<line>]]
-            A list of tuples associating a Commit object with a list of lines that
+            A list of lists associating a Commit object with a list of lines that
             changed within the given commit. The Commit objects will be given in order
             of appearance."""
         if incremental:
             return self.blame_incremental(rev, file, **kwargs)
 
-        data = self.git.blame(rev, '--', file, p=True, stdout_as_string=False, **kwargs)
-        commits = {}
-        blames = []
-        info = None
+        data: bytes = self.git.blame(rev, '--', file, p=True, stdout_as_string=False, **kwargs)
+        commits: Dict[str, Commit] = {}
+        blames: List[List[Commit | List[str | bytes] | None]] = []
+
+        class InfoTD(TypedDict, total=False):
+            sha: str
+            id: str
+            filename: str
+            summary: str
+            author: str
+            author_email: str
+            author_date: int
+            committer: str
+            committer_email: str
+            committer_date: int
+
+        info: InfoTD = {}
 
         keepends = True
-        for line in data.splitlines(keepends):
+        for line_bytes in data.splitlines(keepends):
             try:
-                line = line.rstrip().decode(defenc)
+                line_str = line_bytes.rstrip().decode(defenc)
             except UnicodeDecodeError:
                 firstpart = ''
+                parts = []
                 is_binary = True
             else:
                 # As we don't have an idea when the binary data ends, as it could contain multiple newlines
                 # in the process. So we rely on being able to decode to tell us what is is.
                 # This can absolutely fail even on text files, but even if it does, we should be fine treating it
                 # as binary instead
-                parts = self.re_whitespace.split(line, 1)
+                parts = self.re_whitespace.split(line_str, 1)
                 firstpart = parts[0]
                 is_binary = False
             # end handle decode of line
@@ -844,12 +947,20 @@ class Repo(object):
                     # committer-time 1192271832
                     # committer-tz -0700  - IGNORED BY US
                     role = m.group(0)
-                    if firstpart.endswith('-mail'):
-                        info["%s_email" % role] = parts[-1]
-                    elif firstpart.endswith('-time'):
-                        info["%s_date" % role] = int(parts[-1])
-                    elif role == firstpart:
-                        info[role] = parts[-1]
+                    if role == 'author':
+                        if firstpart.endswith('-mail'):
+                            info["author_email"] = parts[-1]
+                        elif firstpart.endswith('-time'):
+                            info["author_date"] = int(parts[-1])
+                        elif role == firstpart:
+                            info["author"] = parts[-1]
+                    elif role == 'committer':
+                        if firstpart.endswith('-mail'):
+                            info["committer_email"] = parts[-1]
+                        elif firstpart.endswith('-time'):
+                            info["committer_date"] = int(parts[-1])
+                        elif role == firstpart:
+                            info["committer"] = parts[-1]
                     # END distinguish mail,time,name
                 else:
                     # handle
@@ -866,25 +977,29 @@ class Repo(object):
                             c = commits.get(sha)
                             if c is None:
                                 c = Commit(self, hex_to_bin(sha),
-                                           author=Actor._from_string(info['author'] + ' ' + info['author_email']),
+                                           author=Actor._from_string(f"{info['author']} {info['author_email']}"),
                                            authored_date=info['author_date'],
                                            committer=Actor._from_string(
-                                               info['committer'] + ' ' + info['committer_email']),
+                                               f"{info['committer']} {info['committer_email']}"),
                                            committed_date=info['committer_date'])
                                 commits[sha] = c
-                            # END if commit objects needs initial creation
-                            if not is_binary:
-                                if line and line[0] == '\t':
-                                    line = line[1:]
-                            else:
-                                # NOTE: We are actually parsing lines out of binary data, which can lead to the
-                                # binary being split up along the newline separator. We will append this to the blame
-                                # we are currently looking at, even though it should be concatenated with the last line
-                                # we have seen.
-                                pass
-                            # end handle line contents
                             blames[-1][0] = c
-                            blames[-1][1].append(line)
+                            # END if commit objects needs initial creation
+
+                            if blames[-1][1] is not None:
+                                line: str | bytes
+                                if not is_binary:
+                                    if line_str and line_str[0] == '\t':
+                                        line_str = line_str[1:]
+                                    line = line_str
+                                else:
+                                    line = line_bytes
+                                    # NOTE: We are actually parsing lines out of binary data, which can lead to the
+                                    # binary being split up along the newline separator. We will append this to the
+                                    # blame we are currently looking at, even though it should be concatenated with
+                                    # the last line we have seen.
+                                blames[-1][1].append(line)
+
                             info = {'id': sha}
                         # END if we collected commit info
                     # END distinguish filename,summary,rest
@@ -892,8 +1007,9 @@ class Repo(object):
             # END distinguish hexsha vs other information
         return blames
 
-    @classmethod
-    def init(cls, path=None, mkdir=True, odbt=GitCmdObjectDB, expand_vars=True, **kwargs):
+    @ classmethod
+    def init(cls, path: Union[PathLike, None] = None, mkdir: bool = True, odbt: Type[GitCmdObjectDB] = GitCmdObjectDB,
+             expand_vars: bool = True, **kwargs: Any) -> 'Repo':
         """Initialize a git repository at the given path if specified
 
         :param path:
@@ -926,15 +1042,15 @@ class Repo(object):
             os.makedirs(path, 0o755)
 
         # git command automatically chdir into the directory
-        git = Git(path)
+        git = cls.GitCommandWrapperType(path)
         git.init(**kwargs)
         return cls(path, odbt=odbt)
 
-    @classmethod
-    def _clone(cls, git, url, path, odb_default_type, progress, multi_options=None, **kwargs):
-        if progress is not None:
-            progress = to_progress_instance(progress)
-
+    @ classmethod
+    def _clone(cls, git: 'Git', url: PathLike, path: PathLike, odb_default_type: Type[GitCmdObjectDB],
+               progress: Union['RemoteProgress', 'UpdateProgress', Callable[..., 'RemoteProgress'], None] = None,
+               multi_options: Optional[List[str]] = None, **kwargs: Any
+               ) -> 'Repo':
         odbt = kwargs.pop('odbt', odb_default_type)
 
         # when pathlib.Path or other classbased path is passed
@@ -955,20 +1071,24 @@ class Repo(object):
             kwargs['separate_git_dir'] = Git.polish_url(sep_dir)
         multi = None
         if multi_options:
-            multi = ' '.join(multi_options).split(' ')
-        proc = git.clone(multi, Git.polish_url(url), clone_path, with_extended_output=True, as_process=True,
+            multi = shlex.split(' '.join(multi_options))
+        proc = git.clone(multi, Git.polish_url(str(url)), clone_path, with_extended_output=True, as_process=True,
                          v=True, universal_newlines=True, **add_progress(kwargs, git, progress))
         if progress:
-            handle_process_output(proc, None, progress.new_message_handler(), finalize_process, decode_streams=False)
+            handle_process_output(proc, None, to_progress_instance(progress).new_message_handler(),
+                                  finalize_process, decode_streams=False)
         else:
             (stdout, stderr) = proc.communicate()
-            log.debug("Cmd(%s)'s unused stdout: %s", getattr(proc, 'args', ''), stdout)
+            cmdline = getattr(proc, 'args', '')
+            cmdline = remove_password_if_present(cmdline)
+
+            log.debug("Cmd(%s)'s unused stdout: %s", cmdline, stdout)
             finalize_process(proc, stderr=stderr)
 
         # our git command could have a different working dir than our actual
         # environment, hence we prepend its working dir if required
-        if not osp.isabs(path) and git.working_dir:
-            path = osp.join(git._working_dir, path)
+        if not osp.isabs(path):
+            path = osp.join(git._working_dir, path) if git._working_dir is not None else path
 
         repo = cls(path, odbt=odbt)
 
@@ -986,7 +1106,8 @@ class Repo(object):
         # END handle remote repo
         return repo
 
-    def clone(self, path, progress=None, multi_options=None, **kwargs):
+    def clone(self, path: PathLike, progress: Optional[Callable] = None,
+              multi_options: Optional[List[str]] = None, **kwargs: Any) -> 'Repo':
         """Create a clone from this repository.
 
         :param path: is the full path of the new repo (traditionally ends with ./<name>.git).
@@ -994,7 +1115,7 @@ class Repo(object):
         :param multi_options: A list of Clone options that can be provided multiple times.  One
             option per list item which is passed exactly as specified to clone.
             For example ['--config core.filemode=false', '--config core.ignorecase',
-                         '--recurse-submodule=repo1_path', '--recurse-submodule=repo2_path']
+            '--recurse-submodule=repo1_path', '--recurse-submodule=repo2_path']
         :param kwargs:
             * odbt = ObjectDatabase Type, allowing to determine the object database
               implementation used by the returned Repo instance
@@ -1003,23 +1124,31 @@ class Repo(object):
         :return: ``git.Repo`` (the newly cloned repo)"""
         return self._clone(self.git, self.common_dir, path, type(self.odb), progress, multi_options, **kwargs)
 
-    @classmethod
-    def clone_from(cls, url, to_path, progress=None, env=None, multi_options=None, **kwargs):
+    @ classmethod
+    def clone_from(cls, url: PathLike, to_path: PathLike, progress: Optional[Callable] = None,
+                   env: Optional[Mapping[str, str]] = None,
+                   multi_options: Optional[List[str]] = None, **kwargs: Any) -> 'Repo':
         """Create a clone from the given URL
 
         :param url: valid git url, see http://www.kernel.org/pub/software/scm/git/docs/git-clone.html#URLS
         :param to_path: Path to which the repository should be cloned to
         :param progress: See 'git.remote.Remote.push'.
         :param env: Optional dictionary containing the desired environment variables.
-        :param mutli_options: See ``clone`` method
+            Note: Provided variables will be used to update the execution
+            environment for `git`. If some variable is not specified in `env`
+            and is defined in `os.environ`, value from `os.environ` will be used.
+            If you want to unset some variable, consider providing empty string
+            as its value.
+        :param multi_options: See ``clone`` method
         :param kwargs: see the ``clone`` method
         :return: Repo instance pointing to the cloned directory"""
-        git = Git(os.getcwd())
+        git = cls.GitCommandWrapperType(os.getcwd())
         if env is not None:
             git.update_environment(**env)
         return cls._clone(git, url, to_path, GitCmdObjectDB, progress, multi_options, **kwargs)
 
-    def archive(self, ostream, treeish=None, prefix=None, **kwargs):
+    def archive(self, ostream: Union[TextIO, BinaryIO], treeish: Optional[str] = None,
+                prefix: Optional[str] = None, **kwargs: Any) -> Repo:
         """Archive the tree at the given revision.
 
         :param ostream: file compatible stream object to which the archive will be written as bytes
@@ -1040,14 +1169,14 @@ class Repo(object):
             kwargs['prefix'] = prefix
         kwargs['output_stream'] = ostream
         path = kwargs.pop('path', [])
+        path = cast(Union[PathLike, List[PathLike], Tuple[PathLike, ...]], path)
         if not isinstance(path, (tuple, list)):
             path = [path]
         # end assure paths is list
-
         self.git.archive(treeish, *path, **kwargs)
         return self
 
-    def has_separate_working_tree(self):
+    def has_separate_working_tree(self) -> bool:
         """
         :return: True if our git_dir is not at the root of our working_tree_dir, but a .git file with a
             platform agnositic symbolic link. Our git_dir will be wherever the .git file points to
@@ -1055,9 +1184,25 @@ class Repo(object):
         """
         if self.bare:
             return False
-        return osp.isfile(osp.join(self.working_tree_dir, '.git'))
+        if self.working_tree_dir:
+            return osp.isfile(osp.join(self.working_tree_dir, '.git'))
+        else:
+            return False  # or raise Error?
 
     rev_parse = rev_parse
 
-    def __repr__(self):
-        return '<git.Repo "%s">' % self.git_dir
+    def __repr__(self) -> str:
+        clazz = self.__class__
+        return '<%s.%s %r>' % (clazz.__module__, clazz.__name__, self.git_dir)
+
+    def currently_rebasing_on(self) -> Commit | None:
+        """
+        :return: The commit which is currently being replayed while rebasing.
+
+        None if we are not currently rebasing.
+        """
+        if self.git_dir:
+            rebase_head_file = osp.join(self.git_dir, "REBASE_HEAD")
+        if not osp.isfile(rebase_head_file):
+            return None
+        return self.commit(open(rebase_head_file, "rt").readline().strip())
