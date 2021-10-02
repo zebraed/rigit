@@ -5,20 +5,12 @@
 # Copyright 2021 otani  <otani@T5810-065>
 # Created: <2021-09-01>
 # developing in python3x
-from __future__ import (
-print_function,
-unicode_literals,
-division,
-absolute_import
-)
-
-import os
+from __future__ import annotations
 import sys
+import os
 import importlib
-#sys.path.insert(0, 'L:/tools/python/maya')
 from functools import partial
 
-#import rigit.ui.qtApp
 from rigit.ui import rigit_main
 from rigit import gitCmd
 importlib.reload(gitCmd)
@@ -34,15 +26,9 @@ MAX_RECENTLY_COMMIT_LOG = 5
 class RigitMainUI(object):
     gcmd   = None
     def __init__(self, gcmd: gitCmd.RigitCmd):
-        super(RigitMainUI, self).__init__()
-
-        #self.width  = 400
-        #self.height = 200
-
         loader = QtUiTools.QUiLoader()
         ui_path = FILENAME.replace('.py', '.ui')
         self.ui = loader.load(ui_path, None)
-        #self.ui.resize(self.width, self.height)
 
         # set main QMainWindow .ui file.
         self.findUI(self.ui)
