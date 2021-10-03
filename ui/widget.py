@@ -18,40 +18,36 @@ class IconProvider(QtWidgets.QFileIconProvider):
     def __init__(self, *args):
         super(IconProvider, self).__init__()
         global ICON_DIR
+        self.fbx_icon = QtGui.QPixmap(ICON_DIR + '/fbx.png').scaled(16, 16, QtCore.Qt.KeepAspectRatio, QtCore.Qt.FastTransformation)
+        self.mb_icon = QtGui.QPixmap(ICON_DIR + '/mb24.png').scaled(16, 16, QtCore.Qt.KeepAspectRatio, QtCore.Qt.FastTransformation)
+        self.ma_icon = QtGui.QPixmap(ICON_DIR + '/ma24.png').scaled(16, 16, QtCore.Qt.KeepAspectRatio, QtCore.Qt.FastTransformation)
+        self.mel_icon = QtGui.QPixmap(ICON_DIR + '/mel24.png').scaled(16, 16, QtCore.Qt.KeepAspectRatio, QtCore.Qt.FastTransformation)
+        self.py_icon  = QtGui.QPixmap(ICON_DIR + '/python24.png').scaled(16, 16, QtCore.Qt.KeepAspectRatio, QtCore.Qt.FastTransformation)
         self.dir_icon  = QtGui.QPixmap(ICON_DIR + '/folder24.png').scaled(16, 16, QtCore.Qt.KeepAspectRatio, QtCore.Qt.FastTransformation)
         self.dirOpen_icon  = QtGui.QPixmap(ICON_DIR + '/folder_open24.png').scaled(16, 16, QtCore.Qt.KeepAspectRatio, QtCore.Qt.FastTransformation)
 
     def icon(self, fileInfo):
         if fileInfo.isDir():
             return QtGui.QIcon(self.dir_icon)
+        else:
+            ext = fileInfo.suffix()
+            if fileInfo.isFile():
+                if ext == 'py':
+                    return QtGui.QIcon(self.py_icon)
+                elif ext == 'mel':
+                    return QtGui.QIcon(self.mel_icon)
+                elif ext == 'ma':
+                    return QtGui.QIcon(self.ma_icon)
+                elif ext == 'mb':
+                    return QtGui.QIcon(self.mb_icon)
+                elif ext == 'fbx':
+                    return QtGui.QIcon(self.fbx_icon)
         return QtWidgets.QFileIconProvider.icon(self, fileInfo)
 
 class CustomFileSystemModel(QtWidgets.QFileSystemModel):
     def __init__(self, *args):
         super(CustomFileSystemModel, self).__init__(*args)
-        global ICON_DIR
-        self.fbx_icon = QtGui.QPixmap(ICON_DIR + '/fbx.png').scaled(16, 16, QtCore.Qt.KeepAspectRatio, QtCore.Qt.FastTransformation)
-        self.mb_icon = QtGui.QPixmap(ICON_DIR + '/mb24.png').scaled(16, 16, QtCore.Qt.KeepAspectRatio, QtCore.Qt.FastTransformation)
-        self.ma_icon = QtGui.QPixmap(ICON_DIR + '/ma24.png').scaled(16, 16, QtCore.Qt.KeepAspectRatio, QtCore.Qt.FastTransformation)
-        self.mel_icon = QtGui.QPixmap(ICON_DIR + '/mel24.png').scaled(16, 16, QtCore.Qt.KeepAspectRatio, QtCore.Qt.FastTransformation)
-        self.py_icon  = QtGui.QPixmap(ICON_DIR + '/python24.png').scaled(16, 16, QtCore.Qt.KeepAspectRatio, QtCore.Qt.FastTransformation)
         self.setIconProvider(IconProvider())
-    def data(self, index, role):
-        if role == QtCore.Qt.DecorationRole:
-            fileInfo = self.fileInfo(index)
-            ext = fileInfo.suffix()
-            if fileInfo.isFile():
-                if ext == 'py':
-                    return self.py_icon
-                elif ext == 'mel':
-                    return self.mel_icon
-                elif ext == 'ma':
-                    return self.ma_icon
-                elif ext == 'mb':
-                    return self.mb_icon
-                elif ext == 'fbx':
-                    return self.fbx_icon
-        return super(CustomFileSystemModel, self).data(index, role)
 
 class CustomDelegate(QtWidgets.QStyledItemDelegate):
     def displayText(self, value, locale):

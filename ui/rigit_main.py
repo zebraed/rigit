@@ -92,6 +92,7 @@ class RiGitMainUI(QtCore.QObject):
     def initFileColumnView(self):
         self.fileSys_model = CustomFileSystemModel()
         self.fileSys_model.setRootPath(self.rootPath)
+        self.fileSys_model.sort()
 
         self.file_columnView.setModel(self.fileSys_model)
         #self.file_columnView.setRootIsDecorated(False)
