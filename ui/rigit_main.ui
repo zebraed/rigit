@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>858</width>
-    <height>588</height>
+    <height>597</height>
    </rect>
   </property>
   <property name="sizePolicy">
@@ -212,7 +212,7 @@
         <rect>
          <x>280</x>
          <y>10</y>
-         <width>271</width>
+         <width>561</width>
          <height>521</height>
         </rect>
        </property>
@@ -292,7 +292,7 @@
   </action>
   <action name="actionLoad_Settings">
    <property name="text">
-    <string>Load Settings...</string>
+    <string>Project Settings...</string>
    </property>
   </action>
  </widget>

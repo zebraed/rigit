@@ -23,12 +23,8 @@ CustomDelegate,
 CustomListModel,
 ProgressStatusBar
 )
-importlib.reload(gitCmd,
-CustomFileSystemModel,
-CustomDelegate,
-CustomListModel,
-ProgressStatusBar
-)
+importlib.reload(gitCmd)
+
 
 TOP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -41,25 +37,26 @@ class RiGitMainUI(QtCore.QObject):
         super(RiGitMainUI, self).__init__()
         self.setObjectName('RiGitMainUI')
 
-        loader = QtUiTools.QUiLoader()
-        ui_path = FILENAME.replace('.py', '.ui')
-        self.ui = loader.load(ui_path, None)
-
-        self.setupUi()
-
-        # set main QMainWindow .ui file
-        self.setWidgets(self.ui)
-
         # TODO
-        self.setGitPath(gcmd, r"L:\tools\python\maya\testLocalRepo")
+        self.rootPath = "L:/tools/python/maya/testLocalRepo"
+        self.setGitPath(gcmd, self.rootPath)
 
         # set operator class
         self.Commit = Commit(self.gcmd)
 
+        loader = QtUiTools.QUiLoader()
+        ui_path = FILENAME.replace('.py', '.ui')
+        self.ui = loader.load(ui_path, None)
+
+        # set main QMainWindow .ui file
+        self.setWidgets(self.ui)
+
+        self.setupUi()
+
         self.setCallBack()
 
     def setupUi(self):
-        pass
+        self.initFileColumnView()
 
     def setWidgets(self, ui):
         self.mainUI_window     = ui.findChild(QtWidgets.QMainWindow,
@@ -94,7 +91,11 @@ class RiGitMainUI(QtCore.QObject):
 
     def initFileColumnView(self):
         self.fileSys_model = CustomFileSystemModel()
+        self.fileSys_model.setRootPath(self.rootPath)
+
         self.file_columnView.setModel(self.fileSys_model)
+        #self.file_columnView.setRootIsDecorated(False)
+        #self.file_columnView.setSortingEnabled(True)
 
     def initFileLogListView(self):
         pass
