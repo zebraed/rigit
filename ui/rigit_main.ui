@@ -6,18 +6,30 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>302</width>
-    <height>136</height>
+    <width>858</width>
+    <height>588</height>
    </rect>
   </property>
+  <property name="sizePolicy">
+   <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+    <horstretch>0</horstretch>
+    <verstretch>1</verstretch>
+   </sizepolicy>
+  </property>
   <property name="windowTitle">
-   <string>Rigit</string>
+   <string>RiGit - Cheap Git Client</string>
   </property>
   <property name="documentMode">
    <bool>false</bool>
   </property>
-  <widget class="QWidget" name="centralwidget">
-   <layout class="QVBoxLayout" name="topLayout" stretch="0">
+  <widget class="QWidget" name="main_centralwidget">
+   <property name="sizePolicy">
+    <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+     <horstretch>1</horstretch>
+     <verstretch>0</verstretch>
+    </sizepolicy>
+   </property>
+   <layout class="QHBoxLayout" name="horizontalLayout" stretch="0">
     <property name="spacing">
      <number>5</number>
     </property>
@@ -34,30 +46,255 @@
      <number>5</number>
     </property>
     <item>
-     <widget class="QGroupBox" name="groupBox">
+     <widget class="QGroupBox" name="main_groupBox">
       <property name="enabled">
        <bool>true</bool>
+      </property>
+      <property name="sizePolicy">
+       <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+        <horstretch>1</horstretch>
+        <verstretch>1</verstretch>
+       </sizepolicy>
       </property>
       <property name="title">
        <string/>
       </property>
-      <widget class="QPushButton" name="commit_pushButton">
+      <property name="flat">
+       <bool>false</bool>
+      </property>
+      <property name="checkable">
+       <bool>false</bool>
+      </property>
+      <widget class="QWidget" name="verticalLayoutWidget">
        <property name="geometry">
         <rect>
          <x>10</x>
-         <y>40</y>
-         <width>271</width>
-         <height>36</height>
+         <y>10</y>
+         <width>258</width>
+         <height>521</height>
         </rect>
        </property>
-       <property name="text">
-        <string>Commit</string>
+       <layout class="QVBoxLayout" name="commit_v_layout" stretch="0,0,0,0">
+        <property name="spacing">
+         <number>5</number>
+        </property>
+        <property name="sizeConstraint">
+         <enum>QLayout::SetDefaultConstraint</enum>
+        </property>
+        <property name="topMargin">
+         <number>0</number>
+        </property>
+        <property name="bottomMargin">
+         <number>0</number>
+        </property>
+        <item>
+         <widget class="QListView" name="fileLog_listView">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="minimumSize">
+           <size>
+            <width>0</width>
+            <height>280</height>
+           </size>
+          </property>
+          <property name="maximumSize">
+           <size>
+            <width>16777215</width>
+            <height>310</height>
+           </size>
+          </property>
+          <property name="acceptDrops">
+           <bool>false</bool>
+          </property>
+          <property name="autoScrollMargin">
+           <number>7</number>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLineEdit" name="summary_lineEdit">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+            <horstretch>1</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="minimumSize">
+           <size>
+            <width>0</width>
+            <height>30</height>
+           </size>
+          </property>
+          <property name="maximumSize">
+           <size>
+            <width>16777215</width>
+            <height>30</height>
+           </size>
+          </property>
+          <property name="placeholderText">
+           <string>Summary</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPlainTextEdit" name="comment_textEdit">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+            <horstretch>1</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="minimumSize">
+           <size>
+            <width>0</width>
+            <height>0</height>
+           </size>
+          </property>
+          <property name="maximumSize">
+           <size>
+            <width>16777215</width>
+            <height>104</height>
+           </size>
+          </property>
+          <property name="baseSize">
+           <size>
+            <width>0</width>
+            <height>0</height>
+           </size>
+          </property>
+          <property name="cursor" stdset="0">
+           <cursorShape>IBeamCursor</cursorShape>
+          </property>
+          <property name="tabChangesFocus">
+           <bool>true</bool>
+          </property>
+          <property name="placeholderText">
+           <string>Comment</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="commit_pushButton">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+            <horstretch>0</horstretch>
+            <verstretch>1</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="maximumSize">
+           <size>
+            <width>260</width>
+            <height>60</height>
+           </size>
+          </property>
+          <property name="baseSize">
+           <size>
+            <width>0</width>
+            <height>0</height>
+           </size>
+          </property>
+          <property name="layoutDirection">
+           <enum>Qt::LeftToRight</enum>
+          </property>
+          <property name="text">
+           <string>Commit</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </widget>
+      <widget class="QWidget" name="verticalLayoutWidget_2">
+       <property name="geometry">
+        <rect>
+         <x>280</x>
+         <y>10</y>
+         <width>271</width>
+         <height>521</height>
+        </rect>
        </property>
+       <layout class="QVBoxLayout" name="verticalLayout">
+        <item>
+         <widget class="QColumnView" name="file_columnView">
+          <property name="selectionMode">
+           <enum>QAbstractItemView::ExtendedSelection</enum>
+          </property>
+         </widget>
+        </item>
+       </layout>
       </widget>
      </widget>
     </item>
    </layout>
   </widget>
+  <widget class="QMenuBar" name="menuBar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>858</width>
+     <height>21</height>
+    </rect>
+   </property>
+   <widget class="QMenu" name="menuLog">
+    <property name="title">
+     <string>Log</string>
+    </property>
+    <addaction name="actionOpen_Log_Window"/>
+   </widget>
+   <widget class="QMenu" name="menuHelp">
+    <property name="title">
+     <string>Help</string>
+    </property>
+    <addaction name="actionOpen_Help_Document"/>
+    <addaction name="actionOpen_Help_Video"/>
+   </widget>
+   <widget class="QMenu" name="menuAbout">
+    <property name="title">
+     <string>About</string>
+    </property>
+    <addaction name="actionVersion_Info"/>
+   </widget>
+   <widget class="QMenu" name="menuSettings">
+    <property name="title">
+     <string>Setting</string>
+    </property>
+    <addaction name="actionLoad_Settings"/>
+   </widget>
+   <addaction name="menuSettings"/>
+   <addaction name="menuLog"/>
+   <addaction name="menuHelp"/>
+   <addaction name="menuAbout"/>
+  </widget>
+  <widget class="QStatusBar" name="statusBar"/>
+  <action name="actionOpen_Log_Window">
+   <property name="text">
+    <string>Log Window</string>
+   </property>
+  </action>
+  <action name="actionOpen_Help_Document">
+   <property name="text">
+    <string>Open Help Document</string>
+   </property>
+  </action>
+  <action name="actionOpen_Help_Video">
+   <property name="text">
+    <string>Open Help Video</string>
+   </property>
+  </action>
+  <action name="actionVersion_Info">
+   <property name="text">
+    <string>About RiGit</string>
+   </property>
+  </action>
+  <action name="actionLoad_Settings">
+   <property name="text">
+    <string>Load Settings...</string>
+   </property>
+  </action>
  </widget>
  <resources/>
  <connections/>
