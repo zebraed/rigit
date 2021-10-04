@@ -4,7 +4,6 @@
 #
 # Copyright 2021 otani  <otani@T5810-065>
 # Created: <2021-09-01>
-from __future__ import annotations
 import sys
 import os
 import logging
