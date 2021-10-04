@@ -38,7 +38,6 @@ if TYPE_CHECKING:
     from git.remote import Remote
     from git.repo.base import Repo
     from git.config import GitConfigParser, SectionConstraint
-    from git import Git
     # from git.objects.base import IndexObject
 
 
@@ -70,7 +69,7 @@ from gitdb.util import (  # NOQA @IgnorePep8
 # Most of these are unused here, but are for use by git-python modules so these
 # don't see gitdb all the time. Flake of course doesn't like it.
 __all__ = ["stream_copy", "join_path", "to_native_path_linux",
-           "join_path_native", "Stats", "IndexFileSHA1Writer", "IterableObj", "IterableList",
+           "join_path_native", "Stats", "IndexFileSHA1Writer", "Iterable", "IterableList",
            "BlockingLockFile", "LockFile", 'Actor', 'get_user_id', 'assure_directory_exists',
            'RemoteProgress', 'CallableRemoteProgress', 'rmtree', 'unbare_repo',
            'HIDE_WINDOWS_KNOWN_ERRORS']
@@ -380,7 +379,7 @@ def get_user_id() -> str:
     return "%s@%s" % (getpass.getuser(), platform.node())
 
 
-def finalize_process(proc: Union[subprocess.Popen, 'Git.AutoInterrupt'], **kwargs: Any) -> None:
+def finalize_process(proc: subprocess.Popen, **kwargs: Any) -> None:
     """Wait for the process (clone, fetch, pull or push) and handle its errors accordingly"""
     # TODO: No close proc-streams??
     proc.wait(**kwargs)
@@ -404,12 +403,12 @@ def expand_path(p: Union[None, PathLike], expand_vars: bool = True) -> Optional[
         p = osp.expanduser(p)  # type: ignore
         if expand_vars:
             p = osp.expandvars(p)    # type: ignore
-        return osp.normpath(osp.abspath(p))  # type: ignore
+        return osp.normpath(osp.abspath(p))    # type: ignore
     except Exception:
         return None
 
 
-def remove_password_if_present(cmdline: Sequence[str]) -> List[str]:
+def remove_password_if_present(cmdline):
     """
     Parse any command line argument and if on of the element is an URL with a
     password, replace it by stars (in-place).
@@ -705,11 +704,7 @@ class Actor(object):
                 setattr(actor, attr, val)
             except KeyError:
                 if config_reader is not None:
-                    try:
-                        val = config_reader.get('user', cvar)
-                    except Exception:
-                        val = default()
-                    setattr(actor, attr, val)
+                    setattr(actor, attr, config_reader.get_value('user', cvar, default()))
                 # END config-reader handling
                 if not getattr(actor, attr):
                     setattr(actor, attr, default())
@@ -1038,7 +1033,7 @@ class IterableList(List[T_IterableObj]):
 
 class IterableClassWatcher(type):
     """ Metaclass that watches """
-    def __init__(cls, name: str, bases: Tuple, clsdict: Dict) -> None:
+    def __init__(cls, name, bases, clsdict):
         for base in bases:
             if type(base) == IterableClassWatcher:
                 warnings.warn(f"GitPython Iterable subclassed by {name}. "
@@ -1057,7 +1052,7 @@ class Iterable(metaclass=IterableClassWatcher):
     _id_attribute_ = "attribute that most suitably identifies your instance"
 
     @classmethod
-    def list_items(cls, repo: 'Repo', *args: Any, **kwargs: Any) -> Any:
+    def list_items(cls, repo, *args, **kwargs):
         """
         Deprecated, use IterableObj instead.
         Find all items of this type - subclasses can specify args and kwargs differently.
@@ -1067,7 +1062,7 @@ class Iterable(metaclass=IterableClassWatcher):
         :note: Favor the iter_items method as it will
 
         :return:list(Item,...) list of item instances"""
-        out_list: Any = IterableList(cls._id_attribute_)
+        out_list = IterableList(cls._id_attribute_)
         out_list.extend(cls.iter_items(repo, *args, **kwargs))
         return out_list
 

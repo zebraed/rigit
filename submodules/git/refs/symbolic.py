@@ -17,20 +17,17 @@ from gitdb.exc import (
     BadName
 )
 
+import os.path as osp
+
 from .log import RefLog
 
 # typing ------------------------------------------------------------------
 
-from typing import Any, Iterator, List, Tuple, Type, TypeVar, Union, TYPE_CHECKING, cast  # NOQA
-from git.types import Commit_ish, PathLike                                             # NOQA
+from typing import Any, Iterator, List, Match, Optional, Tuple, Type, TypeVar, Union, TYPE_CHECKING  # NOQA
+from git.types import Commit_ish, PathLike, TBD, Literal                                               # NOQA
 
 if TYPE_CHECKING:
     from git.repo import Repo
-    from git.refs import Head, TagReference, RemoteReference, Reference
-    from .log import RefLogEntry
-    from git.config import GitConfigParser
-    from git.objects.commit import Actor
-
 
 T_References = TypeVar('T_References', bound='SymbolicReference')
 
@@ -40,9 +37,9 @@ T_References = TypeVar('T_References', bound='SymbolicReference')
 __all__ = ["SymbolicReference"]
 
 
-def _git_dir(repo: 'Repo', path: Union[PathLike, None]) -> PathLike:
+def _git_dir(repo, path):
     """ Find the git dir that's appropriate for the path"""
-    name = f"{path}"
+    name = "%s" % (path,)
     if name in ['HEAD', 'ORIG_HEAD', 'FETCH_HEAD', 'index', 'logs']:
         return repo.git_dir
     return repo.common_dir
@@ -64,45 +61,44 @@ class SymbolicReference(object):
 
     def __init__(self, repo: 'Repo', path: PathLike, check_path: bool = False):
         self.repo = repo
-        self.path = path
+        self.path = str(path)
 
     def __str__(self) -> str:
-        return str(self.path)
+        return self.path
 
-    def __repr__(self) -> str:
+    def __repr__(self):
         return '<git.%s "%s">' % (self.__class__.__name__, self.path)
 
-    def __eq__(self, other: object) -> bool:
+    def __eq__(self, other):
         if hasattr(other, 'path'):
-            other = cast(SymbolicReference, other)
             return self.path == other.path
         return False
 
-    def __ne__(self, other: object) -> bool:
+    def __ne__(self, other):
         return not (self == other)
 
-    def __hash__(self) -> int:
+    def __hash__(self):
         return hash(self.path)
 
     @property
-    def name(self) -> str:
+    def name(self):
         """
         :return:
             In case of symbolic references, the shortest assumable name
             is the path itself."""
-        return str(self.path)
+        return self.path
 
     @property
-    def abspath(self) -> PathLike:
+    def abspath(self):
         return join_path_native(_git_dir(self.repo, self.path), self.path)
 
     @classmethod
-    def _get_packed_refs_path(cls, repo: 'Repo') -> str:
-        return os.path.join(repo.common_dir, 'packed-refs')
+    def _get_packed_refs_path(cls, repo):
+        return osp.join(repo.common_dir, 'packed-refs')
 
     @classmethod
-    def _iter_packed_refs(cls, repo: 'Repo') -> Iterator[Tuple[str, str]]:
-        """Returns an iterator yielding pairs of sha1/path pairs (as strings) for the corresponding refs.
+    def _iter_packed_refs(cls, repo):
+        """Returns an iterator yielding pairs of sha1/path pairs (as bytes) for the corresponding refs.
         :note: The packed refs file will be kept open as long as we iterate"""
         try:
             with open(cls._get_packed_refs_path(repo), 'rt', encoding='UTF-8') as fp:
@@ -130,7 +126,7 @@ class SymbolicReference(object):
                     if line[0] == '^':
                         continue
 
-                    yield cast(Tuple[str, str], tuple(line.split(' ', 1)))
+                    yield tuple(line.split(' ', 1))
                 # END for each line
         except OSError:
             return None
@@ -141,12 +137,11 @@ class SymbolicReference(object):
         # alright.
 
     @classmethod
-    def dereference_recursive(cls, repo: 'Repo', ref_path: Union[PathLike, None]) -> str:
+    def dereference_recursive(cls, repo, ref_path):
         """
         :return: hexsha stored in the reference at the given ref_path, recursively dereferencing all
             intermediate references as required
         :param repo: the repository containing the reference at ref_path"""
-
         while True:
             hexsha, ref_path = cls._get_ref_info(repo, ref_path)
             if hexsha is not None:
@@ -154,15 +149,14 @@ class SymbolicReference(object):
         # END recursive dereferencing
 
     @classmethod
-    def _get_ref_info_helper(cls, repo: 'Repo', ref_path: Union[PathLike, None]
-                             ) -> Union[Tuple[str, None], Tuple[None, str]]:
+    def _get_ref_info_helper(cls, repo, ref_path):
         """Return: (str(sha), str(target_ref_path)) if available, the sha the file at
         rela_path points to, or None. target_ref_path is the reference we
         point to, or None"""
-        tokens: Union[None, List[str], Tuple[str, str]] = None
+        tokens = None
         repodir = _git_dir(repo, ref_path)
         try:
-            with open(os.path.join(repodir, str(ref_path)), 'rt', encoding='UTF-8') as fp:
+            with open(osp.join(repodir, ref_path), 'rt', encoding='UTF-8') as fp:
                 value = fp.read().rstrip()
             # Don't only split on spaces, but on whitespace, which allows to parse lines like
             # 60b64ef992065e2600bfef6187a97f92398a9144                branch 'master' of git-server:/path/to/repo
@@ -194,13 +188,13 @@ class SymbolicReference(object):
         raise ValueError("Failed to parse reference information from %r" % ref_path)
 
     @classmethod
-    def _get_ref_info(cls, repo: 'Repo', ref_path: Union[PathLike, None]) -> Union[Tuple[str, None], Tuple[None, str]]:
+    def _get_ref_info(cls, repo, ref_path):
         """Return: (str(sha), str(target_ref_path)) if available, the sha the file at
         rela_path points to, or None. target_ref_path is the reference we
         point to, or None"""
         return cls._get_ref_info_helper(repo, ref_path)
 
-    def _get_object(self) -> Commit_ish:
+    def _get_object(self):
         """
         :return:
             The object our ref currently refers to. Refs can be cached, they will
@@ -209,7 +203,7 @@ class SymbolicReference(object):
         # Our path will be resolved to the hexsha which will be used accordingly
         return Object.new_from_sha(self.repo, hex_to_bin(self.dereference_recursive(self.repo, self.path)))
 
-    def _get_commit(self) -> 'Commit':
+    def _get_commit(self):
         """
         :return:
             Commit object we point to, works for detached and non-detached
@@ -224,8 +218,7 @@ class SymbolicReference(object):
         # END handle type
         return obj
 
-    def set_commit(self, commit: Union[Commit, 'SymbolicReference', str], logmsg: Union[str, None] = None
-                   ) -> 'SymbolicReference':
+    def set_commit(self, commit: Union[Commit, 'SymbolicReference', str], logmsg=None):
         """As set_object, but restricts the type of object to be a Commit
 
         :raise ValueError: If commit is not a Commit object or doesn't point to
@@ -254,8 +247,7 @@ class SymbolicReference(object):
 
         return self
 
-    def set_object(self, object: Union[Commit_ish, 'SymbolicReference', str], logmsg: Union[str, None] = None
-                   ) -> 'SymbolicReference':
+    def set_object(self, object, logmsg=None):  # @ReservedAssignment
         """Set the object we point to, possibly dereference our symbolic reference first.
         If the reference does not exist, it will be created
 
@@ -282,10 +274,10 @@ class SymbolicReference(object):
         # set the commit on our reference
         return self._get_reference().set_object(object, logmsg)
 
-    commit = property(_get_commit, set_commit, doc="Query or set commits directly")       # type: ignore
-    object = property(_get_object, set_object, doc="Return the object our ref currently refers to")  # type: ignore
+    commit = property(_get_commit, set_commit, doc="Query or set commits directly")
+    object = property(_get_object, set_object, doc="Return the object our ref currently refers to")
 
-    def _get_reference(self) -> 'SymbolicReference':
+    def _get_reference(self):
         """:return: Reference Object we point to
         :raise TypeError: If this symbolic reference is detached, hence it doesn't point
             to a reference, but to a commit"""
@@ -294,8 +286,7 @@ class SymbolicReference(object):
             raise TypeError("%s is a detached symbolic reference as it points to %r" % (self, sha))
         return self.from_path(self.repo, target_ref_path)
 
-    def set_reference(self, ref: Union[Commit_ish, 'SymbolicReference', str],
-                      logmsg: Union[str, None] = None) -> 'SymbolicReference':
+    def set_reference(self, ref, logmsg=None):
         """Set ourselves to the given ref. It will stay a symbol if the ref is a Reference.
         Otherwise an Object, given as Object instance or refspec, is assumed and if valid,
         will be set which effectively detaches the refererence if it was a purely
@@ -336,7 +327,7 @@ class SymbolicReference(object):
             raise TypeError("Require commit, got %r" % obj)
         # END verify type
 
-        oldbinsha: bytes = b''
+        oldbinsha = None
         if logmsg is not None:
             try:
                 oldbinsha = self.commit.binsha
@@ -365,11 +356,10 @@ class SymbolicReference(object):
         return self
 
     # aliased reference
-    reference: Union['Head', 'TagReference', 'RemoteReference', 'Reference']
-    reference = property(_get_reference, set_reference, doc="Returns the Reference we point to")  # type: ignore
-    ref = reference
+    reference = property(_get_reference, set_reference, doc="Returns the Reference we point to")
+    ref: Union[Commit_ish] = reference     # type: ignore  # Union[str, Commit_ish, SymbolicReference]
 
-    def is_valid(self) -> bool:
+    def is_valid(self):
         """
         :return:
             True if the reference is valid, hence it can be read and points to
@@ -382,7 +372,7 @@ class SymbolicReference(object):
             return True
 
     @property
-    def is_detached(self) -> bool:
+    def is_detached(self):
         """
         :return:
             True if we are a detached reference, hence we point to a specific commit
@@ -393,7 +383,7 @@ class SymbolicReference(object):
         except TypeError:
             return True
 
-    def log(self) -> 'RefLog':
+    def log(self):
         """
         :return: RefLog for this reference. Its last entry reflects the latest change
             applied to this reference
@@ -402,8 +392,7 @@ class SymbolicReference(object):
             instead of calling this method repeatedly. It should be considered read-only."""
         return RefLog.from_file(RefLog.path(self))
 
-    def log_append(self, oldbinsha: bytes, message: Union[str, None],
-                   newbinsha: Union[bytes, None] = None) -> 'RefLogEntry':
+    def log_append(self, oldbinsha, message, newbinsha=None):
         """Append a logentry to the logfile of this ref
 
         :param oldbinsha: binary sha this ref used to point to
@@ -415,19 +404,15 @@ class SymbolicReference(object):
         # correct to allow overriding the committer on a per-commit level.
         # See https://github.com/gitpython-developers/GitPython/pull/146
         try:
-            committer_or_reader: Union['Actor', 'GitConfigParser'] = self.commit.committer
+            committer_or_reader = self.commit.committer
         except ValueError:
             committer_or_reader = self.repo.config_reader()
         # end handle newly cloned repositories
-        if newbinsha is None:
-            newbinsha = self.commit.binsha
+        return RefLog.append_entry(committer_or_reader, RefLog.path(self), oldbinsha,
+                                   (newbinsha is None and self.commit.binsha) or newbinsha,
+                                   message)
 
-        if message is None:
-            message = ''
-
-        return RefLog.append_entry(committer_or_reader, RefLog.path(self), oldbinsha, newbinsha, message)
-
-    def log_entry(self, index: int) -> 'RefLogEntry':
+    def log_entry(self, index):
         """:return: RefLogEntry at the given index
         :param index: python list compatible positive or negative index
 
@@ -437,7 +422,7 @@ class SymbolicReference(object):
         return RefLog.entry_at(RefLog.path(self), index)
 
     @classmethod
-    def to_full_path(cls, path: Union[PathLike, 'SymbolicReference']) -> PathLike:
+    def to_full_path(cls, path) -> PathLike:
         """
         :return: string with a full repository-relative path which can be used to initialize
             a Reference instance, for instance by using ``Reference.from_path``"""
@@ -446,12 +431,12 @@ class SymbolicReference(object):
         full_ref_path = path
         if not cls._common_path_default:
             return full_ref_path
-        if not str(path).startswith(cls._common_path_default + "/"):
+        if not path.startswith(cls._common_path_default + "/"):
             full_ref_path = '%s/%s' % (cls._common_path_default, path)
         return full_ref_path
 
     @classmethod
-    def delete(cls, repo: 'Repo', path: PathLike) -> None:
+    def delete(cls, repo, path):
         """Delete the reference at the given path
 
         :param repo:
@@ -462,8 +447,8 @@ class SymbolicReference(object):
             or just "myreference", hence 'refs/' is implied.
             Alternatively the symbolic reference to be deleted"""
         full_ref_path = cls.to_full_path(path)
-        abs_path = os.path.join(repo.common_dir, full_ref_path)
-        if os.path.exists(abs_path):
+        abs_path = osp.join(repo.common_dir, full_ref_path)
+        if osp.exists(abs_path):
             os.remove(abs_path)
         else:
             # check packed refs
@@ -473,8 +458,8 @@ class SymbolicReference(object):
                     new_lines = []
                     made_change = False
                     dropped_last_line = False
-                    for line_bytes in reader:
-                        line = line_bytes.decode(defenc)
+                    for line in reader:
+                        line = line.decode(defenc)
                         _, _, line_ref = line.partition(' ')
                         line_ref = line_ref.strip()
                         # keep line if it is a comment or if the ref to delete is not
@@ -504,14 +489,12 @@ class SymbolicReference(object):
 
         # delete the reflog
         reflog_path = RefLog.path(cls(repo, full_ref_path))
-        if os.path.isfile(reflog_path):
+        if osp.isfile(reflog_path):
             os.remove(reflog_path)
         # END remove reflog
 
     @classmethod
-    def _create(cls: Type[T_References], repo: 'Repo', path: PathLike, resolve: bool,
-                reference: Union['SymbolicReference', str], force: bool,
-                logmsg: Union[str, None] = None) -> T_References:
+    def _create(cls, repo, path, resolve, reference, force, logmsg=None):
         """internal method used to create a new symbolic reference.
         If resolve is False, the reference will be taken as is, creating
         a proper symbolic reference. Otherwise it will be resolved to the
@@ -519,17 +502,17 @@ class SymbolicReference(object):
         instead"""
         git_dir = _git_dir(repo, path)
         full_ref_path = cls.to_full_path(path)
-        abs_ref_path = os.path.join(git_dir, full_ref_path)
+        abs_ref_path = osp.join(git_dir, full_ref_path)
 
         # figure out target data
         target = reference
         if resolve:
             target = repo.rev_parse(str(reference))
 
-        if not force and os.path.isfile(abs_ref_path):
+        if not force and osp.isfile(abs_ref_path):
             target_data = str(target)
             if isinstance(target, SymbolicReference):
-                target_data = str(target.path)
+                target_data = target.path
             if not resolve:
                 target_data = "ref: " + target_data
             with open(abs_ref_path, 'rb') as fd:
@@ -544,9 +527,8 @@ class SymbolicReference(object):
         return ref
 
     @classmethod
-    def create(cls: Type[T_References], repo: 'Repo', path: PathLike,
-               reference: Union['SymbolicReference', str] = 'HEAD',
-               logmsg: Union[str, None] = None, force: bool = False, **kwargs: Any) -> T_References:
+    def create(cls, repo: 'Repo', path: PathLike, reference: Union[Commit_ish, str] = 'HEAD',
+               logmsg: Union[str, None] = None, force: bool = False, **kwargs: Any):
         """Create a new symbolic reference, hence a reference pointing , to another reference.
 
         :param repo:
@@ -577,7 +559,7 @@ class SymbolicReference(object):
         :note: This does not alter the current HEAD, index or Working Tree"""
         return cls._create(repo, path, cls._resolve_ref_on_create, reference, force, logmsg)
 
-    def rename(self, new_path: PathLike, force: bool = False) -> 'SymbolicReference':
+    def rename(self, new_path, force=False):
         """Rename self to a new path
 
         :param new_path:
@@ -595,9 +577,9 @@ class SymbolicReference(object):
         if self.path == new_path:
             return self
 
-        new_abs_path = os.path.join(_git_dir(self.repo, new_path), new_path)
-        cur_abs_path = os.path.join(_git_dir(self.repo, self.path), self.path)
-        if os.path.isfile(new_abs_path):
+        new_abs_path = osp.join(_git_dir(self.repo, new_path), new_path)
+        cur_abs_path = osp.join(_git_dir(self.repo, self.path), self.path)
+        if osp.isfile(new_abs_path):
             if not force:
                 # if they point to the same file, its not an error
                 with open(new_abs_path, 'rb') as fd1:
@@ -612,8 +594,8 @@ class SymbolicReference(object):
             os.remove(new_abs_path)
         # END handle existing target file
 
-        dname = os.path.dirname(new_abs_path)
-        if not os.path.isdir(dname):
+        dname = osp.dirname(new_abs_path)
+        if not osp.isdir(dname):
             os.makedirs(dname)
         # END create directory
 
@@ -648,7 +630,7 @@ class SymbolicReference(object):
 
         # read packed refs
         for _sha, rela_path in cls._iter_packed_refs(repo):
-            if rela_path.startswith(str(common_path)):
+            if rela_path.startswith(common_path):
                 rela_paths.add(rela_path)
             # END relative path matches common path
         # END packed refs reading
@@ -662,8 +644,8 @@ class SymbolicReference(object):
         # END for each sorted relative refpath
 
     @classmethod
-    def iter_items(cls: Type[T_References], repo: 'Repo', common_path: Union[PathLike, None] = None,
-                   *args: Any, **kwargs: Any) -> Iterator[T_References]:
+    # type: ignore[override]
+    def iter_items(cls, repo: 'Repo', common_path: Union[PathLike, None] = None, *args, **kwargs):
         """Find all refs in the repository
 
         :param repo: is the Repo
@@ -683,7 +665,7 @@ class SymbolicReference(object):
         return (r for r in cls._iter_items(repo, common_path) if r.__class__ == SymbolicReference or not r.is_detached)
 
     @classmethod
-    def from_path(cls: Type[T_References], repo: 'Repo', path: PathLike) -> T_References:
+    def from_path(cls, repo, path):
         """
         :param path: full .git-directory-relative path name to the Reference to instantiate
         :note: use to_full_path() if you only have a partial path of a known Reference Type
@@ -698,19 +680,16 @@ class SymbolicReference(object):
         from . import HEAD, Head, RemoteReference, TagReference, Reference
         for ref_type in (HEAD, Head, RemoteReference, TagReference, Reference, SymbolicReference):
             try:
-                instance: T_References
                 instance = ref_type(repo, path)
                 if instance.__class__ == SymbolicReference and instance.is_detached:
                     raise ValueError("SymbolRef was detached, we drop it")
-                else:
-                    return instance
-
+                return instance
             except ValueError:
                 pass
             # END exception handling
         # END for each type to try
         raise ValueError("Could not find reference type suitable to handle path %r" % path)
 
-    def is_remote(self) -> bool:
+    def is_remote(self):
         """:return: True if this symbolic reference points to a remote branch"""
-        return str(self.path).startswith(self._remote_common_path_default + "/")
+        return self.path.startswith(self._remote_common_path_default + "/")

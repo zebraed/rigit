@@ -31,24 +31,22 @@ import configparser as cp
 # typing-------------------------------------------------------
 
 from typing import (Any, Callable, Generic, IO, List, Dict, Sequence,
-                    TYPE_CHECKING, Tuple, TypeVar, Union, cast)
+                    TYPE_CHECKING, Tuple, TypeVar, Union, cast, overload)
 
-from git.types import Lit_config_levels, ConfigLevels_Tup, PathLike, assert_never, _T
+from git.types import Lit_config_levels, ConfigLevels_Tup, PathLike, TBD, assert_never, _T
 
 if TYPE_CHECKING:
     from git.repo.base import Repo
     from io import BytesIO
 
 T_ConfigParser = TypeVar('T_ConfigParser', bound='GitConfigParser')
-T_OMD_value = TypeVar('T_OMD_value', str, bytes, int, float, bool)
 
-if sys.version_info[:3] < (3, 7, 2):
-    # typing.Ordereddict not added until py 3.7.2
+if sys.version_info[:2] < (3, 7):
     from collections import OrderedDict
     OrderedDict_OMD = OrderedDict
 else:
     from typing import OrderedDict
-    OrderedDict_OMD = OrderedDict[str, List[T_OMD_value]]  # type: ignore[assignment, misc]
+    OrderedDict_OMD = OrderedDict[str, List[_T]]
 
 # -------------------------------------------------------------
 
@@ -72,7 +70,7 @@ CONDITIONAL_INCLUDE_REGEXP = re.compile(r"(?<=includeIf )\"(gitdir|gitdir/i|onbr
 
 class MetaParserBuilder(abc.ABCMeta):
     """Utlity class wrapping base-class methods into decorators that assure read-only properties"""
-    def __new__(cls, name: str, bases: Tuple, clsdict: Dict[str, Any]) -> 'MetaParserBuilder':
+    def __new__(cls, name: str, bases: TBD, clsdict: Dict[str, Any]) -> TBD:
         """
         Equip all base-class methods with a needs_values decorator, and all non-const methods
         with a set_dirty_and_flush_changes decorator in addition to that."""
@@ -98,23 +96,23 @@ class MetaParserBuilder(abc.ABCMeta):
         return new_type
 
 
-def needs_values(func: Callable[..., _T]) -> Callable[..., _T]:
+def needs_values(func: Callable) -> Callable:
     """Returns method assuring we read values (on demand) before we try to access them"""
 
     @wraps(func)
-    def assure_data_present(self: 'GitConfigParser', *args: Any, **kwargs: Any) -> _T:
+    def assure_data_present(self, *args: Any, **kwargs: Any) -> Any:
         self.read()
         return func(self, *args, **kwargs)
     # END wrapper method
     return assure_data_present
 
 
-def set_dirty_and_flush_changes(non_const_func: Callable[..., _T]) -> Callable[..., _T]:
+def set_dirty_and_flush_changes(non_const_func: Callable) -> Callable:
     """Return method that checks whether given non constant function may be called.
     If so, the instance will be set dirty.
     Additionally, we flush the changes right to disk"""
 
-    def flush_changes(self: 'GitConfigParser', *args: Any, **kwargs: Any) -> _T:
+    def flush_changes(self, *args: Any, **kwargs: Any) -> Any:
         rval = non_const_func(self, *args, **kwargs)
         self._dirty = True
         self.write()
@@ -177,7 +175,7 @@ class SectionConstraint(Generic[T_ConfigParser]):
 class _OMD(OrderedDict_OMD):
     """Ordered multi-dict."""
 
-    def __setitem__(self, key: str, value: _T) -> None:
+    def __setitem__(self, key: str, value: _T) -> None:  # type: ignore[override]
         super(_OMD, self).__setitem__(key, [value])
 
     def add(self, key: str, value: Any) -> None:
@@ -203,8 +201,8 @@ class _OMD(OrderedDict_OMD):
         prior = super(_OMD, self).__getitem__(key)
         prior[-1] = value
 
-    def get(self, key: str, default: Union[_T, None] = None) -> Union[_T, None]:
-        return super(_OMD, self).get(key, [default])[-1]
+    def get(self, key: str, default: Union[_T, None] = None) -> Union[_T, None]:  # type: ignore
+        return super(_OMD, self).get(key, [default])[-1]          # type: ignore
 
     def getall(self, key: str) -> List[_T]:
         return super(_OMD, self).__getitem__(key)
@@ -236,8 +234,7 @@ def get_config_path(config_level: Lit_config_levels) -> str:
         raise ValueError("No repo to get repository configuration from. Use Repo._get_config_path")
     else:
         # Should not reach here. Will raise ValueError if does. Static typing will warn missing elifs
-        assert_never(config_level,                    # type: ignore[unreachable]
-                     ValueError(f"Invalid configuration level: {config_level!r}"))
+        assert_never(config_level, ValueError(f"Invalid configuration level: {config_level!r}"))
 
 
 class GitConfigParser(cp.RawConfigParser, metaclass=MetaParserBuilder):
@@ -300,10 +297,10 @@ class GitConfigParser(cp.RawConfigParser, metaclass=MetaParserBuilder):
         :param repo: Reference to repository to use if [includeIf] sections are found in configuration files.
 
         """
-        cp.RawConfigParser.__init__(self, dict_type=_OMD)
-        self._dict: Callable[..., _OMD]  # type: ignore   # mypy/typeshed bug?
-        self._defaults: _OMD
-        self._sections: _OMD              # type: ignore  # mypy/typeshed bug?
+        cp.RawConfigParser.__init__(self, dict_type=_OMD)  # type: ignore[arg-type]
+        self._dict: Callable[..., _OMD]  # type: ignore[assignment]   # mypy/typeshed bug
+        self._defaults: _OMD              # type: ignore[assignment]  # mypy/typeshed bug
+        self._sections: _OMD              # type: ignore[assignment]  # mypy/typeshed bug
 
         # Used in python 3, needs to stay in sync with sections for underlying implementation to work
         if not hasattr(self, '_proxies'):
@@ -358,7 +355,7 @@ class GitConfigParser(cp.RawConfigParser, metaclass=MetaParserBuilder):
         self._acquire_lock()
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, exception_type, exception_value, traceback) -> None:
         self.release()
 
     def release(self) -> None:
@@ -615,11 +612,8 @@ class GitConfigParser(cp.RawConfigParser, metaclass=MetaParserBuilder):
     def _write(self, fp: IO) -> None:
         """Write an .ini-format representation of the configuration state in
         git compatible format"""
-        def write_section(name: str, section_dict: _OMD) -> None:
+        def write_section(name, section_dict):
             fp.write(("[%s]\n" % name).encode(defenc))
-
-            values: Sequence[str]  # runtime only gets str in tests, but should be whatever _OMD stores
-            v: str
             for (key, values) in section_dict.items_all():
                 if key == "__name__":
                     continue
@@ -631,8 +625,7 @@ class GitConfigParser(cp.RawConfigParser, metaclass=MetaParserBuilder):
 
         if self._defaults:
             write_section(cp.DEFAULTSECT, self._defaults)
-        value: _OMD
-
+        value: TBD
         for name, value in self._sections.items():
             write_section(name, value)
 
@@ -708,6 +701,16 @@ class GitConfigParser(cp.RawConfigParser, metaclass=MetaParserBuilder):
     def read_only(self) -> bool:
         """:return: True if this instance may change the configuration file"""
         return self._read_only
+
+    @overload
+    def get_value(self, section: str, option: str, default: str
+                  ) -> str:
+        ...
+
+    @overload
+    def get_value(self, section: str, option: str, default: float
+                  ) -> float:
+        ...
 
     def get_value(self, section: str, option: str, default: Union[int, float, str, bool, None] = None
                   ) -> Union[int, float, str, bool]:

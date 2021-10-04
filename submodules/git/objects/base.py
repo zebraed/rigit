@@ -25,7 +25,6 @@ if TYPE_CHECKING:
     from .tree import Tree
     from .blob import Blob
     from .submodule.base import Submodule
-    from git.refs.reference import Reference
 
 IndexObjUnion = Union['Tree', 'Blob', 'Submodule']
 
@@ -60,7 +59,7 @@ class Object(LazyMixin):
         assert len(binsha) == 20, "Require 20 byte binary sha, got %r, len = %i" % (binsha, len(binsha))
 
     @classmethod
-    def new(cls, repo: 'Repo', id: Union[str, 'Reference']) -> Commit_ish:
+    def new(cls, repo: 'Repo', id):  # @ReservedAssignment
         """
         :return: New Object instance of a type appropriate to the object type behind
             id. The id of the newly created object will be a binsha even though

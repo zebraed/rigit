@@ -5,7 +5,7 @@
 # the BSD License: http://www.opensource.org/licenses/bsd-license.php
 """Module for general utility functions"""
 
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 import warnings
 from git.util import (
     IterableList,
@@ -22,10 +22,10 @@ import calendar
 from datetime import datetime, timedelta, tzinfo
 
 # typing ------------------------------------------------------------
-from typing import (Any, Callable, Deque, Iterator, Generic, NamedTuple, overload, Sequence,  # NOQA: F401
+from typing import (Any, Callable, Deque, Iterator, NamedTuple, overload, Sequence,
                     TYPE_CHECKING, Tuple, Type, TypeVar, Union, cast)
 
-from git.types import Has_id_attribute, Literal, _T             # NOQA: F401
+from git.types import Has_id_attribute, Literal, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from io import BytesIO, StringIO
@@ -35,13 +35,6 @@ if TYPE_CHECKING:
     from .tree import Tree, TraversedTreeTup
     from subprocess import Popen
     from .submodule.base import Submodule
-    from git.types import Protocol, runtime_checkable
-else:
-    # Protocol = Generic[_T]  # NNeeded for typing bug #572?
-    Protocol = ABC
-
-    def runtime_checkable(f):
-        return f
 
 
 class TraverseNT(NamedTuple):
@@ -151,20 +144,20 @@ class tzoffset(tzinfo):
     def __reduce__(self) -> Tuple[Type['tzoffset'], Tuple[float, str]]:
         return tzoffset, (-self._offset.total_seconds(), self._name)
 
-    def utcoffset(self, dt: Union[datetime, None]) -> timedelta:
+    def utcoffset(self, dt) -> timedelta:
         return self._offset
 
-    def tzname(self, dt: Union[datetime, None]) -> str:
+    def tzname(self, dt) -> str:
         return self._name
 
-    def dst(self, dt: Union[datetime, None]) -> timedelta:
+    def dst(self, dt) -> timedelta:
         return ZERO
 
 
 utc = tzoffset(0, 'UTC')
 
 
-def from_timestamp(timestamp: float, tz_offset: float) -> datetime:
+def from_timestamp(timestamp, tz_offset: float) -> datetime:
     """Converts a timestamp + tz_offset into an aware datetime instance."""
     utc_dt = datetime.fromtimestamp(timestamp, utc)
     try:
@@ -174,7 +167,7 @@ def from_timestamp(timestamp: float, tz_offset: float) -> datetime:
         return utc_dt
 
 
-def parse_date(string_date: Union[str, datetime]) -> Tuple[int, int]:
+def parse_date(string_date: str) -> Tuple[int, int]:
     """
     Parse the given date as one of the following
 
@@ -188,13 +181,9 @@ def parse_date(string_date: Union[str, datetime]) -> Tuple[int, int]:
     :raise ValueError: If the format could not be understood
     :note: Date can also be YYYY.MM.DD, MM/DD/YYYY and DD.MM.YYYY.
     """
-    if isinstance(string_date, datetime):
-        if string_date.tzinfo:
-            utcoffset = cast(timedelta, string_date.utcoffset())  # typeguard, if tzinfoand is not None
-            offset = -int(utcoffset.total_seconds())
-            return int(string_date.astimezone(utc).timestamp()), offset
-        else:
-            raise ValueError(f"string_date datetime object without tzinfo, {string_date}")
+    if isinstance(string_date, datetime) and string_date.tzinfo:
+        offset = -int(string_date.utcoffset().total_seconds())
+        return int(string_date.astimezone(utc).timestamp()), offset
 
     # git time
     try:
@@ -256,7 +245,7 @@ def parse_date(string_date: Union[str, datetime]) -> Tuple[int, int]:
             raise ValueError("no format matched")
         # END handle format
     except Exception as e:
-        raise ValueError(f"Unsupported date format or type: {string_date}, type={type(string_date)}") from e
+        raise ValueError("Unsupported date format: %s" % string_date) from e
     # END handle exceptions
 
 
@@ -316,7 +305,7 @@ class Traversable(Protocol):
 
     @classmethod
     @abstractmethod
-    def _get_intermediate_items(cls, item: Any) -> Sequence['Traversable']:
+    def _get_intermediate_items(cls, item) -> Sequence['Traversable']:
         """
         Returns:
             Tuple of items connected to the given item.
@@ -338,7 +327,7 @@ class Traversable(Protocol):
                       stacklevel=2)
         return self._list_traverse(*args, **kwargs)
 
-    def _list_traverse(self, as_edge: bool = False, *args: Any, **kwargs: Any
+    def _list_traverse(self, as_edge=False, *args: Any, **kwargs: Any
                        ) -> IterableList[Union['Commit', 'Submodule', 'Tree', 'Blob']]:
         """
         :return: IterableList with the results of the traversal as produced by
@@ -349,7 +338,7 @@ class Traversable(Protocol):
         """
         # Commit and Submodule have id.__attribute__ as IterableObj
         # Tree has id.__attribute__ inherited from IndexObject
-        if isinstance(self, Has_id_attribute):
+        if isinstance(self, (TraversableIterableObj, Has_id_attribute)):
             id = self._id_attribute_
         else:
             id = ""     # shouldn't reach here, unless Traversable subclass created with no _id_attribute_
@@ -357,7 +346,7 @@ class Traversable(Protocol):
 
         if not as_edge:
             out: IterableList[Union['Commit', 'Submodule', 'Tree', 'Blob']] = IterableList(id)
-            out.extend(self.traverse(as_edge=as_edge, *args, **kwargs))
+            out.extend(self.traverse(as_edge=as_edge, *args, **kwargs))  # type: ignore
             return out
             # overloads in subclasses (mypy does't allow typing self: subclass)
             # Union[IterableList['Commit'], IterableList['Submodule'], IterableList[Union['Submodule', 'Tree', 'Blob']]]
@@ -504,11 +493,6 @@ class TraversableIterableObj(IterableObj, Traversable):
         return super(TraversableIterableObj, self)._list_traverse(* args, **kwargs)
 
     @ overload                     # type: ignore
-    def traverse(self: T_TIobj
-                 ) -> Iterator[T_TIobj]:
-        ...
-
-    @ overload
     def traverse(self: T_TIobj,
                  predicate: Callable[[Union[T_TIobj, Tuple[Union[T_TIobj, None], T_TIobj]], int], bool],
                  prune: Callable[[Union[T_TIobj, Tuple[Union[T_TIobj, None], T_TIobj]], int], bool],

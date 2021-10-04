@@ -22,12 +22,12 @@ from git.util import (
     join_path,
 )
 
-from git.config import (
+from .config import (
     GitConfigParser,
     SectionConstraint,
     cp,
 )
-from git.refs import (
+from .refs import (
     Head,
     Reference,
     RemoteReference,
@@ -37,10 +37,10 @@ from git.refs import (
 
 # typing-------------------------------------------------------
 
-from typing import (Any, Callable, Dict, Iterator, List, NoReturn, Optional, Sequence,
+from typing import (Any, Callable, Dict, Iterator, List, NoReturn, Optional, Sequence,  # NOQA[TC002]
                     TYPE_CHECKING, Type, Union, cast, overload)
 
-from git.types import PathLike, Literal, Commit_ish
+from git.types import PathLike, Literal, TBD, Commit_ish     # NOQA[TC002]
 
 if TYPE_CHECKING:
     from git.repo.base import Repo
@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     # from git.objects import Blob, Tree, TagObject
 
 flagKeyLiteral = Literal[' ', '!', '+', '-', '*', '=', 't', '?']
+
 
 # def is_flagKeyLiteral(inp: str) -> TypeGuard[flagKeyLiteral]:
 #     return inp in [' ', '!', '+', '-', '=', '*', 't', '?']
@@ -632,7 +633,7 @@ class Remote(LazyMixin, IterableObj):
             as well. This is a fix for the issue described here:
             https://github.com/gitpython-developers/GitPython/issues/260
             """
-        out_refs: IterableList[Reference] = IterableList(RemoteReference._id_attribute_, "%s/" % self.name)
+        out_refs: IterableList[RemoteReference] = IterableList(RemoteReference._id_attribute_, "%s/" % self.name)
         for line in self.repo.git.remote("prune", "--dry-run", self).splitlines()[2:]:
             # expecting
             # * [would prune] origin/new_branch
@@ -642,7 +643,7 @@ class Remote(LazyMixin, IterableObj):
             ref_name = line.replace(token, "")
             # sometimes, paths start with a full ref name, like refs/tags/foo, see #260
             if ref_name.startswith(Reference._common_path_default + '/'):
-                out_refs.append(Reference.from_path(self.repo, ref_name))
+                out_refs.append(SymbolicReference.from_path(self.repo, ref_name))
             else:
                 fqhn = "%s/%s" % (RemoteReference._common_path_default, ref_name)
                 out_refs.append(RemoteReference(self.repo, fqhn))
@@ -706,11 +707,9 @@ class Remote(LazyMixin, IterableObj):
         self.repo.git.remote(scmd, self.name, **kwargs)
         return self
 
-    def _get_fetch_info_from_stderr(self, proc: 'Git.AutoInterrupt',
-                                    progress: Union[Callable[..., Any], RemoteProgress, None],
-                                    kill_after_timeout: Union[None, float] = None,
+    def _get_fetch_info_from_stderr(self, proc: TBD,
+                                    progress: Union[Callable[..., Any], RemoteProgress, None]
                                     ) -> IterableList['FetchInfo']:
-
         progress = to_progress_instance(progress)
 
         # skip first line as it is some remote info we are not interested in
@@ -725,8 +724,7 @@ class Remote(LazyMixin, IterableObj):
         cmds = set(FetchInfo._flag_map.keys())
 
         progress_handler = progress.new_message_handler()
-        handle_process_output(proc, None, progress_handler, finalizer=None, decode_streams=False,
-                              kill_after_timeout=kill_after_timeout)
+        handle_process_output(proc, None, progress_handler, finalizer=None, decode_streams=False)
 
         stderr_text = progress.error_lines and '\n'.join(progress.error_lines) or ''
         proc.wait(stderr=stderr_text)
@@ -753,8 +751,8 @@ class Remote(LazyMixin, IterableObj):
             msg += "Will ignore extra progress lines or fetch head lines."
             msg %= (l_fil, l_fhi)
             log.debug(msg)
-            log.debug(b"info lines: " + str(fetch_info_lines).encode("UTF-8"))
-            log.debug(b"head info: " + str(fetch_head_info).encode("UTF-8"))
+            log.debug("info lines: " + str(fetch_info_lines))
+            log.debug("head info : " + str(fetch_head_info))
             if l_fil < l_fhi:
                 fetch_head_info = fetch_head_info[:l_fil]
             else:
@@ -770,9 +768,8 @@ class Remote(LazyMixin, IterableObj):
                 log.warning("Git informed while fetching: %s", err_line.strip())
         return output
 
-    def _get_push_info(self, proc: 'Git.AutoInterrupt',
-                       progress: Union[Callable[..., Any], RemoteProgress, None],
-                       kill_after_timeout: Union[None, float] = None) -> IterableList[PushInfo]:
+    def _get_push_info(self, proc: TBD,
+                       progress: Union[Callable[..., Any], RemoteProgress, None]) -> IterableList[PushInfo]:
         progress = to_progress_instance(progress)
 
         # read progress information from stderr
@@ -789,14 +786,11 @@ class Remote(LazyMixin, IterableObj):
                 # If an error happens, additional info is given which we parse below.
                 pass
 
-        handle_process_output(proc, stdout_handler, progress_handler, finalizer=None, decode_streams=False,
-                              kill_after_timeout=kill_after_timeout)
+        handle_process_output(proc, stdout_handler, progress_handler, finalizer=None, decode_streams=False)
         stderr_text = progress.error_lines and '\n'.join(progress.error_lines) or ''
         try:
             proc.wait(stderr=stderr_text)
         except Exception:
-            # This is different than fetch (which fails if there is any std_err
-            # even if there is an output)
             if not output:
                 raise
             elif stderr_text:
@@ -819,9 +813,7 @@ class Remote(LazyMixin, IterableObj):
 
     def fetch(self, refspec: Union[str, List[str], None] = None,
               progress: Union[RemoteProgress, None, 'UpdateProgress'] = None,
-              verbose: bool = True,
-              kill_after_timeout: Union[None, float] = None,
-              **kwargs: Any) -> IterableList[FetchInfo]:
+              verbose: bool = True, **kwargs: Any) -> IterableList[FetchInfo]:
         """Fetch the latest changes for this remote
 
         :param refspec:
@@ -841,9 +833,6 @@ class Remote(LazyMixin, IterableObj):
             for 'refspec' will make use of this facility.
         :param progress: See 'push' method
         :param verbose: Boolean for verbose output
-        :param kill_after_timeout:
-            To specify a timeout in seconds for the git command, after which the process
-            should be killed. It is set to None by default.
         :param kwargs: Additional arguments to be passed to git-fetch
         :return:
             IterableList(FetchInfo, ...) list of FetchInfo instances providing detailed
@@ -864,22 +853,19 @@ class Remote(LazyMixin, IterableObj):
 
         proc = self.repo.git.fetch(self, *args, as_process=True, with_stdout=False,
                                    universal_newlines=True, v=verbose, **kwargs)
-        res = self._get_fetch_info_from_stderr(proc, progress,
-                                               kill_after_timeout=kill_after_timeout)
+        res = self._get_fetch_info_from_stderr(proc, progress)
         if hasattr(self.repo.odb, 'update_cache'):
             self.repo.odb.update_cache()
         return res
 
     def pull(self, refspec: Union[str, List[str], None] = None,
              progress: Union[RemoteProgress, 'UpdateProgress', None] = None,
-             kill_after_timeout: Union[None, float] = None,
              **kwargs: Any) -> IterableList[FetchInfo]:
         """Pull changes from the given branch, being the same as a fetch followed
         by a merge of branch with your local branch.
 
         :param refspec: see 'fetch' method
         :param progress: see 'push' method
-        :param kill_after_timeout: see 'fetch' method
         :param kwargs: Additional arguments to be passed to git-pull
         :return: Please see 'fetch' method """
         if refspec is None:
@@ -888,15 +874,13 @@ class Remote(LazyMixin, IterableObj):
         kwargs = add_progress(kwargs, self.repo.git, progress)
         proc = self.repo.git.pull(self, refspec, with_stdout=False, as_process=True,
                                   universal_newlines=True, v=True, **kwargs)
-        res = self._get_fetch_info_from_stderr(proc, progress,
-                                               kill_after_timeout=kill_after_timeout)
+        res = self._get_fetch_info_from_stderr(proc, progress)
         if hasattr(self.repo.odb, 'update_cache'):
             self.repo.odb.update_cache()
         return res
 
     def push(self, refspec: Union[str, List[str], None] = None,
              progress: Union[RemoteProgress, 'UpdateProgress', Callable[..., RemoteProgress], None] = None,
-             kill_after_timeout: Union[None, float] = None,
              **kwargs: Any) -> IterableList[PushInfo]:
         """Push changes from source branch in refspec to target branch in refspec.
 
@@ -913,9 +897,6 @@ class Remote(LazyMixin, IterableObj):
               overrides the ``update()`` function.
 
         :note: No further progress information is returned after push returns.
-        :param kill_after_timeout:
-            To specify a timeout in seconds for the git command, after which the process
-            should be killed. It is set to None by default.
         :param kwargs: Additional arguments to be passed to git-push
         :return:
             list(PushInfo, ...) list of PushInfo instances, each
@@ -927,11 +908,8 @@ class Remote(LazyMixin, IterableObj):
             be 0."""
         kwargs = add_progress(kwargs, self.repo.git, progress)
         proc = self.repo.git.push(self, refspec, porcelain=True, as_process=True,
-                                  universal_newlines=True,
-                                  kill_after_timeout=kill_after_timeout,
-                                  **kwargs)
-        return self._get_push_info(proc, progress,
-                                   kill_after_timeout=kill_after_timeout)
+                                  universal_newlines=True, **kwargs)
+        return self._get_push_info(proc, progress)
 
     @ property
     def config_reader(self) -> SectionConstraint[GitConfigParser]:

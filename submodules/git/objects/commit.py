@@ -128,7 +128,6 @@ class Commit(base.Object, TraversableIterableObj, Diffable, Serializable):
             as what time.altzone returns. The sign is inverted compared to git's
             UTC timezone."""
         super(Commit, self).__init__(repo, binsha)
-        self.binsha = binsha
         if tree is not None:
             assert isinstance(tree, Tree), "Tree needs to be a Tree instance, was %s" % type(tree)
         if tree is not None:
@@ -282,7 +281,7 @@ class Commit(base.Object, TraversableIterableObj, Diffable, Serializable):
         proc = repo.git.rev_list(rev, args_list, as_process=True, **kwargs)
         return cls._iter_from_process_or_stream(repo, proc)
 
-    def iter_parents(self, paths: Union[PathLike, Sequence[PathLike]] = '', **kwargs: Any) -> Iterator['Commit']:
+    def iter_parents(self, paths: Union[PathLike, Sequence[PathLike]] = '', **kwargs) -> Iterator['Commit']:
         """Iterate _all_ parents of this commit.
 
         :param paths:
@@ -362,7 +361,7 @@ class Commit(base.Object, TraversableIterableObj, Diffable, Serializable):
     def create_from_tree(cls, repo: 'Repo', tree: Union[Tree, str], message: str,
                          parent_commits: Union[None, List['Commit']] = None, head: bool = False,
                          author: Union[None, Actor] = None, committer: Union[None, Actor] = None,
-                         author_date: Union[None, str] = None, commit_date: Union[None, str] = None) -> 'Commit':
+                         author_date: Union[None, str] = None, commit_date: Union[None, str] = None):
         """Commit the given tree, creating a commit object.
 
         :param repo: Repo object the commit should be part of
@@ -403,7 +402,7 @@ class Commit(base.Object, TraversableIterableObj, Diffable, Serializable):
         else:
             for p in parent_commits:
                 if not isinstance(p, cls):
-                    raise ValueError(f"Parent commit '{p!r}' must be of type {cls}")
+                    raise ValueError("Parent commit '%r' must be of type %s" % (p, cls))
             # end check parent commit types
         # END if parent commits are unset
 
@@ -446,8 +445,6 @@ class Commit(base.Object, TraversableIterableObj, Diffable, Serializable):
         # assume utf8 encoding
         enc_section, enc_option = cls.conf_encoding.split('.')
         conf_encoding = cr.get_value(enc_section, enc_option, cls.default_encoding)
-        if not isinstance(conf_encoding, str):
-            raise TypeError("conf_encoding could not be coerced to str")
 
         # if the tree is no object, make sure we create one - otherwise
         # the created commit object is invalid

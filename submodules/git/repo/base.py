@@ -3,7 +3,6 @@
 #
 # This module is part of GitPython and is released under
 # the BSD License: http://www.opensource.org/licenses/bsd-license.php
-from __future__ import annotations
 import logging
 import os
 import re
@@ -38,13 +37,13 @@ import gitdb
 
 # typing ------------------------------------------------------
 
-from git.types import TBD, PathLike, Lit_config_levels, Commit_ish, Tree_ish, assert_never
+from git.types import TBD, PathLike, Lit_config_levels, Commit_ish, Tree_ish
 from typing import (Any, BinaryIO, Callable, Dict,
                     Iterator, List, Mapping, Optional, Sequence,
                     TextIO, Tuple, Type, Union,
                     NamedTuple, cast, TYPE_CHECKING)
 
-from git.types import ConfigLevels_Tup, TypedDict
+from git.types import ConfigLevels_Tup
 
 if TYPE_CHECKING:
     from git.util import IterableList
@@ -52,6 +51,7 @@ if TYPE_CHECKING:
     from git.objects import Tree
     from git.objects.submodule.base import UpdateProgress
     from git.remote import RemoteProgress
+
 
 # -----------------------------------------------------------
 
@@ -200,6 +200,7 @@ class Repo(object):
         # END while curpath
 
         if self.git_dir is None:
+            self.git_dir = cast(PathLike, self.git_dir)
             raise InvalidGitRepositoryError(epath)
 
         self._bare = False
@@ -234,7 +235,7 @@ class Repo(object):
     def __enter__(self) -> 'Repo':
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, exc_type: TBD, exc_value: TBD, traceback: TBD) -> None:
         self.close()
 
     def __del__(self) -> None:
@@ -384,13 +385,13 @@ class Repo(object):
         :return: created submodules"""
         return Submodule.add(self, *args, **kwargs)
 
-    def iter_submodules(self, *args: Any, **kwargs: Any) -> Iterator[Submodule]:
+    def iter_submodules(self, *args: Any, **kwargs: Any) -> Iterator:
         """An iterator yielding Submodule instances, see Traversable interface
         for a description of args and kwargs
         :return: Iterator"""
         return RootModule(self).traverse(*args, **kwargs)
 
-    def submodule_update(self, *args: Any, **kwargs: Any) -> Iterator[Submodule]:
+    def submodule_update(self, *args: Any, **kwargs: Any) -> Iterator:
         """Update the submodules, keeping the repository consistent as it will
         take the previous state into consideration. For more information, please
         see the documentation of RootModule.update"""
@@ -411,25 +412,24 @@ class Repo(object):
         return TagReference(self, full_path)
 
     @staticmethod
-    def _to_full_tag_path(path: PathLike) -> str:
-        path_str = str(path)
-        if path_str.startswith(TagReference._common_path_default + '/'):
-            return path_str
-        if path_str.startswith(TagReference._common_default + '/'):
-            return Reference._common_path_default + '/' + path_str
+    def _to_full_tag_path(path):
+        if path.startswith(TagReference._common_path_default + '/'):
+            return path
+        if path.startswith(TagReference._common_default + '/'):
+            return Reference._common_path_default + '/' + path
         else:
-            return TagReference._common_path_default + '/' + path_str
+            return TagReference._common_path_default + '/' + path
 
     def create_head(self, path: PathLike, commit: str = 'HEAD',
                     force: bool = False, logmsg: Optional[str] = None
-                    ) -> 'Head':
+                    ) -> 'SymbolicReference':
         """Create a new head within the repository.
         For more documentation, please see the Head.create method.
 
         :return: newly created Head Reference"""
         return Head.create(self, path, commit, logmsg, force)
 
-    def delete_head(self, *heads: 'Head', **kwargs: Any) -> None:
+    def delete_head(self, *heads: 'SymbolicReference', **kwargs: Any) -> None:
         """Delete the given heads
 
         :param kwargs: Additional keyword arguments to be passed to git-branch"""
@@ -444,7 +444,7 @@ class Repo(object):
         :return: TagReference object """
         return TagReference.create(self, path, ref, message, force, **kwargs)
 
-    def delete_tag(self, *tags: TagReference) -> None:
+    def delete_tag(self, *tags: TBD) -> None:
         """Delete the given tag references"""
         return TagReference.delete(self, *tags)
 
@@ -480,12 +480,10 @@ class Repo(object):
                 raise NotADirectoryError
             else:
                 return osp.normpath(osp.join(repo_dir, "config"))
-        else:
 
-            assert_never(config_level,                                                  # type:ignore[unreachable]
-                         ValueError(f"Invalid configuration level: {config_level!r}"))
+        raise ValueError("Invalid configuration level: %r" % config_level)
 
-    def config_reader(self, config_level: Optional[Lit_config_levels] = None,
+    def config_reader(self, config_level: Optional[Lit_config_levels] = None
                       ) -> GitConfigParser:
         """
         :return:
@@ -776,7 +774,7 @@ class Repo(object):
         finalize_process(proc)
         return untracked_files
 
-    def ignored(self, *paths: PathLike) -> List[str]:
+    def ignored(self, *paths: PathLike) -> List[PathLike]:
         """Checks if paths are ignored via .gitignore
         Doing so using the "git check-ignore" method.
 
@@ -784,19 +782,19 @@ class Repo(object):
         :return: subset of those paths which are ignored
         """
         try:
-            proc: str = self.git.check_ignore(*paths)
+            proc = self.git.check_ignore(*paths)
         except GitCommandError:
             return []
         return proc.replace("\\\\", "\\").replace('"', "").split("\n")
 
     @property
-    def active_branch(self) -> Head:
+    def active_branch(self) -> 'SymbolicReference':
         """The name of the currently active branch.
+
         :return: Head to the active branch"""
-        # reveal_type(self.head.reference)  # => Reference
         return self.head.reference
 
-    def blame_incremental(self, rev: str | HEAD, file: str, **kwargs: Any) -> Iterator['BlameEntry']:
+    def blame_incremental(self, rev: TBD, file: TBD, **kwargs: Any) -> Optional[Iterator['BlameEntry']]:
         """Iterator for blame information for the given file at the given revision.
 
         Unlike .blame(), this does not return the actual file's contents, only
@@ -810,9 +808,8 @@ class Repo(object):
         If you combine all line number ranges outputted by this command, you
         should get a continuous range spanning all line numbers in the file.
         """
-
-        data: bytes = self.git.blame(rev, '--', file, p=True, incremental=True, stdout_as_string=False, **kwargs)
-        commits: Dict[bytes, Commit] = {}
+        data = self.git.blame(rev, '--', file, p=True, incremental=True, stdout_as_string=False, **kwargs)
+        commits: Dict[str, Commit] = {}
 
         stream = (line for line in data.split(b'\n') if line)
         while True:
@@ -820,15 +817,15 @@ class Repo(object):
                 line = next(stream)  # when exhausted, causes a StopIteration, terminating this function
             except StopIteration:
                 return
-            split_line = line.split()
-            hexsha, orig_lineno_b, lineno_b, num_lines_b = split_line
-            lineno = int(lineno_b)
-            num_lines = int(num_lines_b)
-            orig_lineno = int(orig_lineno_b)
+            split_line: Tuple[str, str, str, str] = line.split()
+            hexsha, orig_lineno_str, lineno_str, num_lines_str = split_line
+            lineno = int(lineno_str)
+            num_lines = int(num_lines_str)
+            orig_lineno = int(orig_lineno_str)
             if hexsha not in commits:
                 # Now read the next few lines and build up a dict of properties
                 # for this commit
-                props: Dict[bytes, bytes] = {}
+                props = {}
                 while True:
                     try:
                         line = next(stream)
@@ -872,8 +869,8 @@ class Repo(object):
                              safe_decode(orig_filename),
                              range(orig_lineno, orig_lineno + num_lines))
 
-    def blame(self, rev: Union[str, HEAD], file: str, incremental: bool = False, **kwargs: Any
-              ) -> List[List[Commit | List[str | bytes] | None]] | Iterator[BlameEntry] | None:
+    def blame(self, rev: TBD, file: TBD, incremental: bool = False, **kwargs: Any
+              ) -> Union[List[List[Union[Optional['Commit'], List[str]]]], Optional[Iterator[BlameEntry]]]:
         """The blame information for the given file at the given revision.
 
         :param rev: revision specifier, see git-rev-parse for viable options.
@@ -885,38 +882,25 @@ class Repo(object):
         if incremental:
             return self.blame_incremental(rev, file, **kwargs)
 
-        data: bytes = self.git.blame(rev, '--', file, p=True, stdout_as_string=False, **kwargs)
-        commits: Dict[str, Commit] = {}
-        blames: List[List[Commit | List[str | bytes] | None]] = []
+        data = self.git.blame(rev, '--', file, p=True, stdout_as_string=False, **kwargs)
+        commits: Dict[str, TBD] = {}
+        blames: List[List[Union[Optional['Commit'], List[str]]]] = []
 
-        class InfoTD(TypedDict, total=False):
-            sha: str
-            id: str
-            filename: str
-            summary: str
-            author: str
-            author_email: str
-            author_date: int
-            committer: str
-            committer_email: str
-            committer_date: int
-
-        info: InfoTD = {}
+        info: Dict[str, TBD] = {}  # use Any until TypedDict available
 
         keepends = True
-        for line_bytes in data.splitlines(keepends):
+        for line in data.splitlines(keepends):
             try:
-                line_str = line_bytes.rstrip().decode(defenc)
+                line = line.rstrip().decode(defenc)
             except UnicodeDecodeError:
                 firstpart = ''
-                parts = []
                 is_binary = True
             else:
                 # As we don't have an idea when the binary data ends, as it could contain multiple newlines
                 # in the process. So we rely on being able to decode to tell us what is is.
                 # This can absolutely fail even on text files, but even if it does, we should be fine treating it
                 # as binary instead
-                parts = self.re_whitespace.split(line_str, 1)
+                parts = self.re_whitespace.split(line, 1)
                 firstpart = parts[0]
                 is_binary = False
             # end handle decode of line
@@ -947,20 +931,12 @@ class Repo(object):
                     # committer-time 1192271832
                     # committer-tz -0700  - IGNORED BY US
                     role = m.group(0)
-                    if role == 'author':
-                        if firstpart.endswith('-mail'):
-                            info["author_email"] = parts[-1]
-                        elif firstpart.endswith('-time'):
-                            info["author_date"] = int(parts[-1])
-                        elif role == firstpart:
-                            info["author"] = parts[-1]
-                    elif role == 'committer':
-                        if firstpart.endswith('-mail'):
-                            info["committer_email"] = parts[-1]
-                        elif firstpart.endswith('-time'):
-                            info["committer_date"] = int(parts[-1])
-                        elif role == firstpart:
-                            info["committer"] = parts[-1]
+                    if firstpart.endswith('-mail'):
+                        info["%s_email" % role] = parts[-1]
+                    elif firstpart.endswith('-time'):
+                        info["%s_date" % role] = int(parts[-1])
+                    elif role == firstpart:
+                        info[role] = parts[-1]
                     # END distinguish mail,time,name
                 else:
                     # handle
@@ -977,29 +953,26 @@ class Repo(object):
                             c = commits.get(sha)
                             if c is None:
                                 c = Commit(self, hex_to_bin(sha),
-                                           author=Actor._from_string(f"{info['author']} {info['author_email']}"),
+                                           author=Actor._from_string(info['author'] + ' ' + info['author_email']),
                                            authored_date=info['author_date'],
                                            committer=Actor._from_string(
-                                               f"{info['committer']} {info['committer_email']}"),
+                                               info['committer'] + ' ' + info['committer_email']),
                                            committed_date=info['committer_date'])
                                 commits[sha] = c
-                            blames[-1][0] = c
                             # END if commit objects needs initial creation
-
+                            if not is_binary:
+                                if line and line[0] == '\t':
+                                    line = line[1:]
+                            else:
+                                # NOTE: We are actually parsing lines out of binary data, which can lead to the
+                                # binary being split up along the newline separator. We will append this to the blame
+                                # we are currently looking at, even though it should be concatenated with the last line
+                                # we have seen.
+                                pass
+                            # end handle line contents
+                            blames[-1][0] = c
                             if blames[-1][1] is not None:
-                                line: str | bytes
-                                if not is_binary:
-                                    if line_str and line_str[0] == '\t':
-                                        line_str = line_str[1:]
-                                    line = line_str
-                                else:
-                                    line = line_bytes
-                                    # NOTE: We are actually parsing lines out of binary data, which can lead to the
-                                    # binary being split up along the newline separator. We will append this to the
-                                    # blame we are currently looking at, even though it should be concatenated with
-                                    # the last line we have seen.
                                 blames[-1][1].append(line)
-
                             info = {'id': sha}
                         # END if we collected commit info
                     # END distinguish filename,summary,rest
@@ -1007,7 +980,7 @@ class Repo(object):
             # END distinguish hexsha vs other information
         return blames
 
-    @ classmethod
+    @classmethod
     def init(cls, path: Union[PathLike, None] = None, mkdir: bool = True, odbt: Type[GitCmdObjectDB] = GitCmdObjectDB,
              expand_vars: bool = True, **kwargs: Any) -> 'Repo':
         """Initialize a git repository at the given path if specified
@@ -1042,11 +1015,11 @@ class Repo(object):
             os.makedirs(path, 0o755)
 
         # git command automatically chdir into the directory
-        git = cls.GitCommandWrapperType(path)
+        git = Git(path)
         git.init(**kwargs)
         return cls(path, odbt=odbt)
 
-    @ classmethod
+    @classmethod
     def _clone(cls, git: 'Git', url: PathLike, path: PathLike, odb_default_type: Type[GitCmdObjectDB],
                progress: Union['RemoteProgress', 'UpdateProgress', Callable[..., 'RemoteProgress'], None] = None,
                multi_options: Optional[List[str]] = None, **kwargs: Any
@@ -1124,9 +1097,9 @@ class Repo(object):
         :return: ``git.Repo`` (the newly cloned repo)"""
         return self._clone(self.git, self.common_dir, path, type(self.odb), progress, multi_options, **kwargs)
 
-    @ classmethod
+    @classmethod
     def clone_from(cls, url: PathLike, to_path: PathLike, progress: Optional[Callable] = None,
-                   env: Optional[Mapping[str, str]] = None,
+                   env: Optional[Mapping[str, Any]] = None,
                    multi_options: Optional[List[str]] = None, **kwargs: Any) -> 'Repo':
         """Create a clone from the given URL
 
@@ -1142,13 +1115,13 @@ class Repo(object):
         :param multi_options: See ``clone`` method
         :param kwargs: see the ``clone`` method
         :return: Repo instance pointing to the cloned directory"""
-        git = cls.GitCommandWrapperType(os.getcwd())
+        git = Git(os.getcwd())
         if env is not None:
             git.update_environment(**env)
         return cls._clone(git, url, to_path, GitCmdObjectDB, progress, multi_options, **kwargs)
 
     def archive(self, ostream: Union[TextIO, BinaryIO], treeish: Optional[str] = None,
-                prefix: Optional[str] = None, **kwargs: Any) -> Repo:
+                prefix: Optional[str] = None, **kwargs: Any) -> 'Repo':
         """Archive the tree at the given revision.
 
         :param ostream: file compatible stream object to which the archive will be written as bytes
@@ -1195,7 +1168,7 @@ class Repo(object):
         clazz = self.__class__
         return '<%s.%s %r>' % (clazz.__module__, clazz.__name__, self.git_dir)
 
-    def currently_rebasing_on(self) -> Commit | None:
+    def currently_rebasing_on(self) -> Union['SymbolicReference', Commit_ish, None]:
         """
         :return: The commit which is currently being replayed while rebasing.
 

@@ -215,7 +215,7 @@ class Tree(IndexObject, git_diff.Diffable, util.Traversable, util.Serializable):
         super(Tree, self).__init__(repo, binsha, mode, path)
 
     @ classmethod
-    def _get_intermediate_items(cls, index_object: IndexObjUnion,
+    def _get_intermediate_items(cls, index_object: 'Tree',
                                 ) -> Union[Tuple['Tree', ...], Tuple[()]]:
         if index_object.type == "tree":
             return tuple(index_object._iter_convert_to_object(index_object._cache))
@@ -375,8 +375,8 @@ class Tree(IndexObject, git_diff.Diffable, util.Traversable, util.Serializable):
         # END for each item
         return False
 
-    def __reversed__(self) -> Iterator[IndexObjUnion]:
-        return reversed(self._iter_convert_to_object(self._cache))  # type: ignore
+    def __reversed__(self):
+        return reversed(self._iter_convert_to_object(self._cache))
 
     def _serialize(self, stream: 'BytesIO') -> 'Tree':
         """Serialize this tree into the stream. Please note that we will assume

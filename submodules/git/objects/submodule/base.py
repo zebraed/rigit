@@ -57,7 +57,6 @@ from git.types import Commit_ish, Literal, PathLike, TBD
 if TYPE_CHECKING:
     from git.index import IndexFile
     from git.repo import Repo
-    from git.refs import Head
 
 
 # -----------------------------------------------------------------------------
@@ -266,7 +265,7 @@ class Submodule(IndexObject, TraversableIterableObj):
         # end
 
     @classmethod
-    def _clone_repo(cls, repo: 'Repo', url: str, path: PathLike, name: str, **kwargs: Any) -> 'Repo':
+    def _clone_repo(cls, repo, url, path, name, **kwargs):
         """:return: Repo instance of newly cloned repository
         :param repo: our parent repository
         :param url: url to clone from
@@ -280,7 +279,7 @@ class Submodule(IndexObject, TraversableIterableObj):
             module_abspath_dir = osp.dirname(module_abspath)
             if not osp.isdir(module_abspath_dir):
                 os.makedirs(module_abspath_dir)
-            module_checkout_path = osp.join(str(repo.working_tree_dir), path)
+            module_checkout_path = osp.join(repo.working_tree_dir, path)
         # end
 
         clone = git.Repo.clone_from(url, module_checkout_path, **kwargs)
@@ -379,7 +378,6 @@ class Submodule(IndexObject, TraversableIterableObj):
         :return: The newly created submodule instance
         :note: works atomically, such that no change will be done if the repository
             update fails for instance"""
-
         if repo.bare:
             raise InvalidGitRepositoryError("Cannot add submodules to bare repositories")
         # END handle bare repos
@@ -435,7 +433,7 @@ class Submodule(IndexObject, TraversableIterableObj):
             url = urls[0]
         else:
             # clone new repo
-            kwargs: Dict[str, Union[bool, int, str, Sequence[TBD]]] = {'n': no_checkout}
+            kwargs: Dict[str, Union[bool, int, Sequence[TBD]]] = {'n': no_checkout}
             if not branch_is_default:
                 kwargs['b'] = br.name
             # END setup checkout-branch
@@ -486,7 +484,7 @@ class Submodule(IndexObject, TraversableIterableObj):
     def update(self, recursive: bool = False, init: bool = True, to_latest_revision: bool = False,
                progress: Union['UpdateProgress', None] = None, dry_run: bool = False,
                force: bool = False, keep_going: bool = False, env: Union[Mapping[str, str], None] = None,
-               clone_multi_options: Union[Sequence[TBD], None] = None) -> 'Submodule':
+               clone_multi_options: Union[Sequence[TBD], None] = None):
         """Update the repository of this submodule to point to the checkout
         we point at with the binsha of this instance.
 
@@ -565,7 +563,6 @@ class Submodule(IndexObject, TraversableIterableObj):
                     progress.update(op, i, len_rmts, prefix + "Done fetching remote of submodule %r" % self.name)
                 # END fetch new data
             except InvalidGitRepositoryError:
-                mrepo = None
                 if not init:
                     return self
                 # END early abort if init is not allowed
@@ -606,7 +603,7 @@ class Submodule(IndexObject, TraversableIterableObj):
 
                         # make sure HEAD is not detached
                         mrepo.head.set_reference(local_branch, logmsg="submodule: attaching head to %s" % local_branch)
-                        mrepo.head.reference.set_tracking_branch(remote_branch)
+                        mrepo.head.ref.set_tracking_branch(remote_branch)
                     except (IndexError, InvalidGitRepositoryError):
                         log.warning("Failed to checkout tracking branch %s", self.branch_path)
                     # END handle tracking branch
@@ -632,14 +629,13 @@ class Submodule(IndexObject, TraversableIterableObj):
             if mrepo is not None and to_latest_revision:
                 msg_base = "Cannot update to latest revision in repository at %r as " % mrepo.working_dir
                 if not is_detached:
-                    rref = mrepo.head.reference.tracking_branch()
+                    rref = mrepo.head.ref.tracking_branch()
                     if rref is not None:
                         rcommit = rref.commit
                         binsha = rcommit.binsha
                         hexsha = rcommit.hexsha
                     else:
-                        log.error("%s a tracking branch was not set for local branch '%s'",
-                                  msg_base, mrepo.head.reference)
+                        log.error("%s a tracking branch was not set for local branch '%s'", msg_base, mrepo.head.ref)
                     # END handle remote ref
                 else:
                     log.error("%s there was no local tracking branch", msg_base)
@@ -714,7 +710,7 @@ class Submodule(IndexObject, TraversableIterableObj):
         return self
 
     @unbare_repo
-    def move(self, module_path: PathLike, configuration: bool = True, module: bool = True) -> 'Submodule':
+    def move(self, module_path, configuration=True, module=True):
         """Move the submodule to a another module path. This involves physically moving
         the repository at our current path, changing the configuration, as well as
         adjusting our index entry accordingly.
@@ -744,7 +740,7 @@ class Submodule(IndexObject, TraversableIterableObj):
             return self
         # END handle no change
 
-        module_checkout_abspath = join_path_native(str(self.repo.working_tree_dir), module_checkout_path)
+        module_checkout_abspath = join_path_native(self.repo.working_tree_dir, module_checkout_path)
         if osp.isfile(module_checkout_abspath):
             raise ValueError("Cannot move repository onto a file: %s" % module_checkout_abspath)
         # END handle target files
@@ -1162,7 +1158,7 @@ class Submodule(IndexObject, TraversableIterableObj):
         # END handle object state consistency
 
     @property
-    def branch(self) -> 'Head':
+    def branch(self):
         """:return: The branch instance that we are to checkout
         :raise InvalidGitRepositoryError: if our module is not yet checked out"""
         return mkhead(self.module(), self._branch_path)
