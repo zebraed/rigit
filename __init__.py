@@ -8,11 +8,3 @@ def reload():
         if k.find("rigit") > -1:
             del sys.modules[k]
     print("# Reload: rigit modules")
-
-if __name__ == '__main__':
-    app = QtWidgets.QApplication.instance()
-    if not app:
-        app = QtWidgets.QApplication(sys.argv)
-    win = RigitMainUI(gitCmd.RigitCmd)
-    win.show()
-    sys.exit(app.exec_())
