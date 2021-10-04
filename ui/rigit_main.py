@@ -40,7 +40,7 @@ class RiGitMainUI(QtCore.QObject):
         self.__comment = ""
 
         # TODO
-        self.rootPath = "L:/tools/python/maya/testLocalRepo"
+        self.rootPath = "../../testLocalRepo"
         self.setGitPath(gcmd, self.rootPath)
 
         # set operator class
