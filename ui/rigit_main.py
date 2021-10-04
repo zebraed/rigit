@@ -179,10 +179,7 @@ class Commit:
         return summary + '\n' + comment
 
     def add_commit(self, summary: str, comment: str):
-        print(summary)
-        print(comment)
         message = self.connect_message(summary, comment)
-        print(message)
         res_add_untracked  = self.gcmd.do_add_untracked()
         res_add_unstaged   = self.gcmd.do_add_unstaged()
         res_commit         = self.gcmd.do_commit(message)
