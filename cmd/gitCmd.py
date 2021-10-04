@@ -95,13 +95,12 @@ class RigitCmd(object):
         else:
             return False
 
-    def do_commit(self, comment) -> bool:
+    def do_commit(self, message) -> bool:
         if self.is_repo:
             # head > commit
             repo = self.repo
-            print('commit')
             try:
-                repo.index.commit(comment)
+                repo.index.commit(message)
                 return True
             except GitCommandError as e:
                 print(e)

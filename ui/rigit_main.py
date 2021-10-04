@@ -36,6 +36,9 @@ class RiGitMainUI(QtCore.QObject):
         super(RiGitMainUI, self).__init__()
         self.setObjectName('RiGitMainUI')
 
+        self.__summary = ""
+        self.__comment = ""
+
         # TODO
         self.rootPath = "L:/tools/python/maya/testLocalRepo"
         self.setGitPath(gcmd, self.rootPath)
@@ -56,6 +59,7 @@ class RiGitMainUI(QtCore.QObject):
 
     def setupUi(self):
         self.initFileColumnView()
+        self.summaryChanged()
 
     def setWidgets(self, ui):
         self.mainUI_window     = ui.findChild(QtWidgets.QMainWindow,
@@ -76,7 +80,7 @@ class RiGitMainUI(QtCore.QObject):
         self.summary_lineEdit  = ui.findChild(QtWidgets.QLineEdit,
                                               "summary_lineEdit")
 
-        self.comment_textEdit  = ui.findChild(QtWidgets.QTextEdit,
+        self.comment_textEdit  = ui.findChild(QtWidgets.QPlainTextEdit,
                                               "comment_textEdit")
 
         self.commit_pushButton = ui.findChild(QtWidgets.QPushButton,
@@ -91,14 +95,42 @@ class RiGitMainUI(QtCore.QObject):
     def initFileColumnView(self):
         self.fileSys_model = CustomFileSystemModel()
         self.fileSys_model.setRootPath(self.rootPath)
-        self.fileSys_model.sort()
+        #self.fileSys_model.sort()
 
         self.file_columnView.setModel(self.fileSys_model)
-        #self.file_columnView.setRootIsDecorated(False)
-        #self.file_columnView.setSortingEnabled(True)
+        self.file_columnView.setRootIndex(self.fileSys_model.index(self.rootPath))
 
     def initFileLogListView(self):
         pass
+
+    def setLineEdit2Summary(self):
+        if not self.summary_lineEdit.text():
+            self.summary = ""
+        else:
+            self.summary = self.summary_lineEdit.text()
+
+    @property
+    def summary(self):
+        return self.__summary
+
+
+    @summary.setter
+    def summary(self, summary):
+        self.__summary = summary
+
+    def setPlaneText2Comment(self):
+        if not self.comment_textEdit.toPlainText():
+            self.comment = ""
+        else:
+            self.comment = self.comment_textEdit.toPlainText()
+
+    @property
+    def comment(self):
+        return self.__comment
+
+    @comment.setter
+    def comment(self, comment):
+        self.__comment = comment
 
     def setGitPath(self, gcmd, path: str):
         # self.SetPath_lineEdit
@@ -107,14 +139,32 @@ class RiGitMainUI(QtCore.QObject):
     def log(self, text: str):
         pass
 
-    def setCallBack(self):
-        comment = "doCommit"
-        self.commit_pushButton.clicked.connect(
-            partial(self.Commit.add_commit, comment)
-        )
-
     def loadSettings(self):
         pass
+
+    def setCallBack(self):
+        self.commit_pushButton.clicked.connect(
+            lambda:self.Commit.add_commit(self.summary, self.comment)
+            )
+
+        self.summary_lineEdit.textChanged[str].connect(
+            self.summaryChanged
+        )
+
+        self.comment_textEdit.textChanged.connect(
+            self.commentChanged
+        )
+
+    def summaryChanged(self, *args):
+        self.setLineEdit2Summary()
+        summary = self.summary
+        if summary == "":
+            self.commit_pushButton.setEnabled(False)
+        else:
+            self.commit_pushButton.setEnabled(True)
+
+    def commentChanged(self, *args):
+        self.setPlaneText2Comment()
 
     def show(self):
         self.ui.show()
@@ -124,12 +174,21 @@ class Commit:
     def __init__(self, gcmd):
         self.gcmd = gcmd
 
-    def add_commit(self, comment):
+    @staticmethod
+    def connect_message(summary: str, comment: str) -> str:
+        return summary + '\n' + comment
+
+    def add_commit(self, summary: str, comment: str):
+        print(summary)
+        print(comment)
+        message = self.connect_message(summary, comment)
+        print(message)
         res_add_untracked  = self.gcmd.do_add_untracked()
         res_add_unstaged   = self.gcmd.do_add_unstaged()
-        res_commit         = self.gcmd.do_commit(comment)
+        res_commit         = self.gcmd.do_commit(message)
         print(res_add_untracked)
         print(res_add_unstaged)
+        print(res_commit)
 
 
 if __name__ == '__main__':
