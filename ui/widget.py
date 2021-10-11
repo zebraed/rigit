@@ -14,6 +14,9 @@ ICON_DIR = os.path.abspath(os.path.join(__file__, '../icons'))
 
 
 class IconProvider(QtWidgets.QFileIconProvider):
+    """
+    custom icon provider settings for QFileSystemModel.
+    """
     def __init__(self, *args):
         super(IconProvider, self).__init__()
         global ICON_DIR
@@ -25,9 +28,14 @@ class IconProvider(QtWidgets.QFileIconProvider):
         self.dir_icon  = QtGui.QPixmap(ICON_DIR + '/folder24.png').scaled(16, 16, QtCore.Qt.KeepAspectRatio, QtCore.Qt.FastTransformation)
         self.dirOpen_icon  = QtGui.QPixmap(ICON_DIR + '/folder_open24.png').scaled(16, 16, QtCore.Qt.KeepAspectRatio, QtCore.Qt.FastTransformation)
 
+        self.isSelected = False
+
     def icon(self, fileInfo):
         if fileInfo.isDir():
-            return QtGui.QIcon(self.dir_icon)
+            if self.isSelected:
+                return QtGui.QIcon(self.dirOpen_icon)
+            else:
+                return QtGui.QIcon(self.dir_icon)
         else:
             ext = fileInfo.suffix()
             if fileInfo.isFile():
@@ -43,24 +51,22 @@ class IconProvider(QtWidgets.QFileIconProvider):
                     return QtGui.QIcon(self.fbx_icon)
         return QtWidgets.QFileIconProvider.icon(self, fileInfo)
 
+
 class CustomFileSystemModel(QtWidgets.QFileSystemModel):
     def __init__(self, *args):
         super(CustomFileSystemModel, self).__init__(*args)
-        self.setIconProvider(IconProvider())
+        #self.setIconProvider(IconProvider())
+
 
 class CustomDelegate(QtWidgets.QStyledItemDelegate):
-    def displayText(self, value, locale):
-        if value != "" and value != "/":
-            try:
-                iso_date = parse(value)
-                return iso_date.isoformat(" ")
-            except:
-                return super(CustomDelegate, self).displayText(value, locale)
-        else:
-            return super(CustomDelegate, self).displayText(value, locale)
+    def __init__(self, parent=None):
+        super(CustomDelegate, self).__init__(parent)
 
 class CustomListModel(QtCore.QAbstractItemModel):
     pass
 
 class ProgressStatusBar(QtWidgets.QProgressBar):
+    pass
+
+class PopupContext():
     pass

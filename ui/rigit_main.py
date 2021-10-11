@@ -8,15 +8,19 @@
 import sys
 import os
 import importlib
+import subprocess
+import re
 import threading
 import logging
 from functools import partial
 
 from PySide2 import QtCore, QtGui, QtWidgets, QtUiTools
 
-from rigit.ui import rigit_main
+#from rigit.ui import rigit_log
+#from rigit.ui import rigit_diffView
 from rigit.cmd import gitCmd
 from rigit.ui.widget import(
+IconProvider,
 CustomFileSystemModel,
 CustomDelegate,
 CustomListModel,
@@ -95,10 +99,17 @@ class RiGitMainUI(QtCore.QObject):
     def initFileColumnView(self):
         self.fileSys_model = CustomFileSystemModel()
         self.fileSys_model.setRootPath(self.rootPath)
-        #self.fileSys_model.sort()
+        self.iconProvider = IconProvider()
+        self.fileSys_model.setIconProvider(self.iconProvider)
 
         self.file_columnView.setModel(self.fileSys_model)
         self.file_columnView.setRootIndex(self.fileSys_model.index(self.rootPath))
+
+        self.fileSys_delegate = CustomDelegate()
+        self.file_columnView.setItemDelegate(self.fileSys_delegate)
+
+        self.file_columnView.slectionModel()
+        QtWidgets.QColumnView.selection
 
     def initFileLogListView(self):
         pass
@@ -146,14 +157,43 @@ class RiGitMainUI(QtCore.QObject):
         self.commit_pushButton.clicked.connect(
             lambda:self.Commit.add_commit(self.summary, self.comment)
             )
+        self.commit_pushButton.clicked.connect(
+            lambda:self.commitButtonPressed(self.Commit.commit_status)
+            )
 
         self.summary_lineEdit.textChanged[str].connect(
             self.summaryChanged
-        )
+            )
 
         self.comment_textEdit.textChanged.connect(
             self.commentChanged
-        )
+            )
+        """
+        self.file_columnView.clicked.connect(
+            self.fileItemClicked
+            )
+        """
+        self.file_columnView.doubleClicked.connect(
+            self.fileItemDoubleClicked
+            )
+
+    def fileItemClicked(self, index):
+        filePath = self.fileSys_model.filePath(index)
+        if os.path.isdir(filePath):
+            self.iconProvider.isSelected = True
+        else:
+            self.iconProvider.isSelected = False
+        self.fileSys_model.setIconProvider(self.iconProvider)
+
+    def fileItemDoubleClicked(self, index):
+        filePath = self.fileSys_model.filePath(index)
+        if os.path.isfile(filePath):
+            self.openFile(filePath)
+        elif os.path.isdir(filePath):
+            self.openDir(filePath)
+
+    def fileItemSelectionChanged(self, selected, deselected):
+        index =  ""
 
     def summaryChanged(self, *args):
         self.setLineEdit2Summary()
@@ -166,6 +206,29 @@ class RiGitMainUI(QtCore.QObject):
     def commentChanged(self, *args):
         self.setPlaneText2Comment()
 
+    def commitButtonPressed(self, *args):
+        if args[0]:
+            self.summary_lineEdit.clear()
+            self.comment_textEdit.clear()
+
+    def openFile(self, filePath):
+        if os.name == 'nt':
+            os.startfile(filePath)
+        else:
+            subprocess.call(['xdg-open', filePath])
+
+    def openDir(self, dirpath):
+        if os.name == 'nt':
+            fileManager = 'explorer'
+            path = re.sub('/', '\\\\', dirpath)
+        elif os.name == 'posix':
+            fileManager = 'nautilus'
+            path = re.sub('\\\\', '/', dirpath)
+        elif os.name == "mac":
+            fileManager = 'open'
+            path = re.sub('\\\\', '/', dirpath)
+        subprocess.Popen([fileManager, path])
+
     def show(self):
         self.ui.show()
 
@@ -173,6 +236,7 @@ class RiGitMainUI(QtCore.QObject):
 class Commit:
     def __init__(self, gcmd):
         self.gcmd = gcmd
+        self.commit_status = False
 
     @staticmethod
     def connect_message(summary: str, comment: str) -> str:
@@ -182,16 +246,14 @@ class Commit:
         message = self.connect_message(summary, comment)
         res_add_untracked  = self.gcmd.do_add_untracked()
         res_add_unstaged   = self.gcmd.do_add_unstaged()
-        res_commit         = self.gcmd.do_commit(message)
+        self.commit_status = self.gcmd.do_commit(message)
         print(res_add_untracked)
         print(res_add_unstaged)
-        print(res_commit)
-
 
 if __name__ == '__main__':
     app = QtWidgets.QApplication.instance()
     if not app:
         app = QtWidgets.QApplication(sys.argv)
-    win = RiGitMainUI(gitCmd.RigitCmd)
-    win.show()
+    RiGit = RiGitMainUI(gitCmd.RigitCmd)
+    RiGit.show()
     sys.exit(app.exec_())
