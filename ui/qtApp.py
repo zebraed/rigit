@@ -72,5 +72,5 @@ def create_qApp():
 
 
 if __name__ == '__main__':
-   = run()
-  gi.show()
+    gi = run()
+    gi.show()

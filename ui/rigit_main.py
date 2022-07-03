@@ -2,9 +2,11 @@
 # -*- coding: utf-8 -*-
 # vim:fenc=utf-8
 #
-# Copyright 2021 otani  <otani@T5810-065>
-# Created: <2021-09-01>
+# Copyright 2022 otani  <otani@T5810-065>
+# Created: <2022-05-01>
 # developing in python3x
+from __future__ import annotations
+
 import sys
 import os
 import importlib
@@ -28,8 +30,8 @@ ProgressStatusBar
 )
 importlib.reload(gitCmd)
 
-
-TOP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+MAIN_PATH = os.path.join(os.path.dirname(__file__), '..', '..')
+TOP_DIR   = os.path.abspath(MAIN_PATH)
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 FILENAME = os.path.split(__file__)[-1]
 
@@ -44,14 +46,15 @@ class RiGitMainUI(QtCore.QObject):
         self.__comment = ""
 
         # TODO
-        self.rootPath = "../../testLocalRepo"
+        self.rootPath = "../testLocalRepo"
         self.setGitPath(gcmd, self.rootPath)
 
         # set operator class
         self.Commit = Commit(self.gcmd)
 
         loader = QtUiTools.QUiLoader()
-        ui_path = FILENAME.replace('.py', '.ui')
+        ui_fileName = FILENAME.replace('.py', '.ui')
+        ui_path = os.path.join(CURRENT_DIR, ui_fileName)
         self.ui = loader.load(ui_path, None)
 
         # set main QMainWindow .ui file
@@ -108,8 +111,8 @@ class RiGitMainUI(QtCore.QObject):
         self.fileSys_delegate = CustomDelegate()
         self.file_columnView.setItemDelegate(self.fileSys_delegate)
 
-        self.file_columnView.slectionModel()
-        QtWidgets.QColumnView.selection
+        #self.file_columnView.slectionModel()
+        #QtWidgets.QColumnView.selection
 
     def initFileLogListView(self):
         pass
@@ -233,7 +236,7 @@ class RiGitMainUI(QtCore.QObject):
         self.ui.show()
 
 
-class Commit:
+class Commit(object):
     def __init__(self, gcmd):
         self.gcmd = gcmd
         self.commit_status = False
