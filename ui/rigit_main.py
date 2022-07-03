@@ -33,7 +33,7 @@ importlib.reload(gitCmd)
 MAIN_PATH = os.path.join(os.path.dirname(__file__), '..', '..')
 TOP_DIR   = os.path.abspath(MAIN_PATH)
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-FILENAME = os.path.split(__file__)[-1]
+FILENAME    = os.path.split(__file__)[-1]
 
 
 class RiGitMainUI(QtCore.QObject):
